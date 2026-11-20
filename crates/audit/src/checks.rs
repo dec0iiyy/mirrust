@@ -434,15 +434,16 @@ pub(crate) fn http2(input: &Input<'_>) -> Option<Check> {
 pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
     const ID: &str = "headers";
     const TITLE: &str = "Request headers of the claimed browser";
-    /// First major versions that send `Sec-Fetch-*`: Chrome 76, Firefox 90 and Safari 17 (Safari
-    /// 16.4 already does; 17 keeps clear of the boundary). Older browsers are not penalised.
-    const SEC_FETCH_FROM: [(Engine, u32); 3] = [
-        (Engine::Chromium, 76),
-        (Engine::Gecko, 90),
-        (Engine::WebKit, 17),
+    /// First versions (major, minor) that send a `Sec-Fetch-*` header: Chrome 76, Firefox 90
+    /// and Safari 16.4, as MDN's browser-compat-data has them for `Sec-Fetch-Site` and
+    /// `Sec-Fetch-Mode`. Older browsers are not penalised.
+    const SEC_FETCH_FROM: [(Engine, (u32, u32)); 3] = [
+        (Engine::Chromium, (76, 0)),
+        (Engine::Gecko, (90, 0)),
+        (Engine::WebKit, (16, 4)),
     ];
-    /// First Chromium major version that sends `Sec-CH-UA`.
-    const SEC_CH_UA_FROM: u32 = 89;
+    /// First Chromium version that sends `Sec-CH-UA`.
+    const SEC_CH_UA_FROM: (u32, u32) = (89, 0);
     let (lines, agent) = (input.headers?, input.agent?);
     let engine = engine(agent)?;
     let family = agent.family.name();
@@ -454,10 +455,14 @@ pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
         })
     };
     // A User-Agent without a version counts as current, except for WebKit: iOS browsers that
-    // are not Safari state none.
-    let since = |from: u32| match engine {
-        Engine::WebKit => agent.major.is_some_and(|major| major >= from),
-        Engine::Chromium | Engine::Gecko => agent.major.is_none_or(|major| major >= from),
+    // are not Safari state none. A version without a minor number counts as its `.0`, the
+    // oldest it can be, so that nothing is asked of a browser that may predate the header.
+    let since = |from: (u32, u32)| {
+        let version = agent.major.map(|major| (major, agent.minor.unwrap_or(0)));
+        match engine {
+            Engine::WebKit => version.is_some_and(|version| version >= from),
+            Engine::Chromium | Engine::Gecko => version.is_none_or(|version| version >= from),
+        }
     };
     let sends_sec_fetch = SEC_FETCH_FROM
         .iter()
@@ -809,6 +814,38 @@ mod tests {
         let mut input = Input::new(&hello, &firefox);
         input.headers = Some(&bare);
         assert_eq!(self::headers(&input).expect("applies").status, Status::Fail);
+    }
+
+    #[test]
+    fn safari_is_asked_for_sec_fetch_from_16_4_on() {
+        let safari = |version: &str| {
+            format!(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, \
+                 like Gecko) Version/{version} Safari/605.1.15"
+            )
+        };
+        let without = [
+            "accept-encoding: gzip".to_owned(),
+            "accept-language: en".to_owned(),
+        ];
+        let hello = ClientHello::default();
+        let status = |version: &str| {
+            let user_agent = safari(version);
+            let mut input = Input::new(&hello, &user_agent);
+            input.headers = Some(&without);
+            self::headers(&input).expect("applies").status
+        };
+        // MDN browser-compat-data: Sec-Fetch-Site, -Mode and -Dest since Safari 16.4.
+        for older in ["15.6", "16.0", "16.3.1", "16"] {
+            assert_eq!(
+                status(older),
+                Status::Pass,
+                "Safari {older} does not send them"
+            );
+        }
+        for newer in ["16.4", "16.6", "17.0", "18.2"] {
+            assert_eq!(status(newer), Status::Fail, "Safari {newer} sends them");
+        }
     }
 
     #[test]

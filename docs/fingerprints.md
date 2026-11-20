@@ -751,7 +751,7 @@ they are reported:
 | `alps_alpn` | Every protocol named in `application_settings` (17513 or 17613) must also be in ALPN. | 30 |
 | `grease` | A hello that uses GREASE has it in cipher suites, extensions, groups and versions alike. | 20 |
 | `http2` | The Akamai fingerprint with the one recorded for the matched client; without one, the pseudo-header order with the claimed engine's (Chromium `m,a,s,p`, Firefox `m,p,a,s`). | 30 |
-| `headers` | Only with a browser `User-Agent` and when the server saw the headers (HTTP/1.1, HTTP/2): `sec-ch-ua` (Chromium from 89; Chromium leaves it out when JavaScript is blocked for the site or the `User-Agent` was overridden, so it counts less), `sec-fetch-*` (Chromium from 76, Firefox from 90, Safari from 17), `accept-language`, `accept-encoding`. | 10, 20, 10, 10; at most 30 |
+| `headers` | Only with a browser `User-Agent` and when the server saw the headers (HTTP/1.1, HTTP/2): `sec-ch-ua` (Chromium from 89; Chromium leaves it out when JavaScript is blocked for the site or the `User-Agent` was overridden, so it counts less), `sec-fetch-*` (Chromium from 76, Firefox from 90, Safari from 16.4, the versions in MDN's browser-compat-data; a Safari `Version/16` without a minor number is not asked for them), `accept-language`, `accept-encoding`. | 10, 20, 10, 10; at most 30 |
 | `tcp_os` | The system whose default SYN has these TCP options with the system the `User-Agent` names. `skip`, with no penalty, while the server does not capture the SYN, which is always for now. | 30 |
 | `tcp_mss` | The MSS with the Ethernet value (1460, or 1440 over IPv6), allowing 8 bytes for `PPPoE`. Left out while there is no SYN. | 10 when more than 8 lower |
 

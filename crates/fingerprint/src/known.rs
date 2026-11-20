@@ -287,6 +287,10 @@ pub struct UserAgent {
     /// version, `python-requests/` and `python-httpx/` state the library's version, and `node`
     /// states none.
     pub major: Option<u32>,
+    /// The number after the first dot of that version: 4 for Safari's `Version/16.4`.
+    ///
+    /// `None` without a major version, and when no number follows it.
+    pub minor: Option<u32>,
 }
 
 impl UserAgent {
@@ -299,23 +303,31 @@ impl UserAgent {
     pub fn parse(user_agent: &str) -> Option<Self> {
         let user_agent = user_agent.trim();
         let lower = user_agent.to_ascii_lowercase();
-        let known = |family, major| Some(Self { family, major });
+        // The family with the version that starts `version`, or with none.
+        let known = |family, version: Option<&str>| {
+            let (major, minor) = version.map_or((None, None), major_minor);
+            Some(Self {
+                family,
+                major,
+                minor,
+            })
+        };
 
         // Tools name themselves in the first product token.
         if let Some(version) = lower.strip_prefix("curl/") {
-            return known(AgentFamily::Curl, major(version));
+            return known(AgentFamily::Curl, Some(version));
         }
         if lower.starts_with("go-http-client/") {
             return known(AgentFamily::Go, None);
         }
         if let Some(version) = lower.strip_prefix("python-urllib/") {
-            return known(AgentFamily::Python, major(version));
+            return known(AgentFamily::Python, Some(version));
         }
         if lower.starts_with("python-requests/") || lower.starts_with("python-httpx/") {
             return known(AgentFamily::Python, None);
         }
         if let Some(version) = lower.strip_prefix("okhttp/") {
-            return known(AgentFamily::OkHttp, major(version));
+            return known(AgentFamily::OkHttp, Some(version));
         }
         if lower == "node" || lower.starts_with("undici") || lower.starts_with("node-fetch/") {
             return known(AgentFamily::Node, None);
@@ -329,27 +341,34 @@ impl UserAgent {
                 .map(|at| &user_agent[at + token.len()..])
         };
         if let Some(version) = after("Edg/").or_else(|| after("EdgA/")) {
-            return known(AgentFamily::Edge, major(version));
+            return known(AgentFamily::Edge, Some(version));
         }
         if let Some(version) = after("Firefox/") {
-            return known(AgentFamily::Firefox, major(version));
+            return known(AgentFamily::Firefox, Some(version));
         }
         if let Some(version) = after("Chrome/").or_else(|| after("Chromium/")) {
-            return known(AgentFamily::Chrome, major(version));
+            return known(AgentFamily::Chrome, Some(version));
         }
         if after("Safari/").is_some() {
-            return known(AgentFamily::Safari, after("Version/").and_then(major));
+            return known(AgentFamily::Safari, after("Version/"));
         }
         None
     }
 }
 
-/// The number a version starts with.
-fn major(version: &str) -> Option<u32> {
-    let digits = version
-        .find(|c: char| !c.is_ascii_digit())
-        .map_or(version, |end| &version[..end]);
-    digits.parse().ok()
+/// The number a version starts with, and the number after the dot that follows it.
+fn major_minor(version: &str) -> (Option<u32>, Option<u32>) {
+    let number = |text: &str| -> Option<u32> {
+        let digits = text
+            .find(|c: char| !c.is_ascii_digit())
+            .map_or(text, |end| &text[..end]);
+        digits.parse().ok()
+    };
+    let Some(major) = number(version) else {
+        return (None, None);
+    };
+    let rest = version.trim_start_matches(|c: char| c.is_ascii_digit());
+    (Some(major), rest.strip_prefix('.').and_then(number))
 }
 
 #[cfg(test)]
@@ -558,9 +577,29 @@ mod tests {
             ("rustls-get", None),
         ];
         for (text, expected) in cases {
-            let expected = expected.map(|(family, major)| UserAgent { family, major });
-            assert_eq!(UserAgent::parse(text), expected, "User-Agent {text:?}");
+            let parsed = UserAgent::parse(text).map(|agent| (agent.family, agent.major));
+            assert_eq!(parsed, expected, "User-Agent {text:?}");
         }
+    }
+
+    #[test]
+    fn user_agent_minor_versions() {
+        let minor = |text: &str| UserAgent::parse(text).expect("known").minor;
+        let safari = |version: &str| {
+            format!(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, \
+                 like Gecko) Version/{version} Safari/605.1.15"
+            )
+        };
+        assert_eq!(minor(&safari("16.4")), Some(4));
+        assert_eq!(minor(&safari("16.3.1")), Some(3));
+        assert_eq!(minor(&safari("17.0")), Some(0));
+        assert_eq!(minor(&safari("16")), None);
+        assert_eq!(minor(&safari("16.")), None);
+        assert_eq!(minor(&safari("x")), None, "no major version, no minor");
+        assert_eq!(minor("curl/8.7.1"), Some(7));
+        assert_eq!(minor(CHROME_UA), Some(0));
+        assert_eq!(minor("Go-http-client/2.0"), None);
     }
 
     #[test]
