@@ -2,7 +2,7 @@
 #
 #   cargo deny check
 #
-# Not run by CI. The keys follow the current documentation (the 0.18 series): `version` and
+# Run by .github/workflows/deny.yml on a change to a manifest or to Cargo.lock, and weekly. The keys follow the current documentation (the 0.18 series): `version` and
 # the removed `vulnerability`, `notice`, `unlicensed`, `copyleft` and `deny` licence keys are
 # left out on purpose.
 

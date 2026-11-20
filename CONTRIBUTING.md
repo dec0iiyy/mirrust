@@ -47,7 +47,8 @@ into an error.
 ## Dependencies
 
 After a change to a dependency or to `Cargo.lock`, check the advisories, the licences and the
-duplicate versions. Neither tool is installed by the repository, and CI does not run them
+duplicate versions. Neither tool is installed by the repository; CI runs `cargo deny check` (workflow
+`Dependencies`, on a dependency change and weekly) but not `cargo audit`
 (`cargo install --locked cargo-deny cargo-audit`):
 
 ```console
