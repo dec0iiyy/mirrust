@@ -397,6 +397,14 @@ The `quic` crate extracts the ClientHello from a client's first flight without a
   (`quic::MAX_CRYPTO_LEN`); a CRYPTO frame may end at most 4 KiB beyond the bytes received
   without a gap, and the data may be in at most 64 separate ranges. Past any of these the
   packet is rejected; if the ClientHello never completes, the server's report has `"tls": null`.
+- A CRYPTO frame may repeat bytes that were already received (a retransmission). If it has
+  other bytes for them, the assembly ends for good and the report has `"tls": null`: RFC 9000
+  section 2.2 forbids a sender to change the data at an offset, a receiver may keep either
+  copy, and the ClientHello reported must be the one the server's QUIC stack read.
+- A packet that cannot be read ends the datagram. The Initial packets in front of it count.
+- In the server, a datagram under 1200 bytes does not start a connection's assembly, because
+  quinn ignores such a datagram (RFC 9000 section 14.1); the `quic` crate itself has no
+  such rule, so that captures can be read offline whatever their size.
 
 Limits: packet numbers are decoded as if nothing had been acknowledged, which holds for a
 client's first flight. Retry and Version Negotiation packets are ignored, and only the length of

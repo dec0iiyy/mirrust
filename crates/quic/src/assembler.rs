@@ -106,7 +106,10 @@ impl ClientInitial {
 ///
 /// Feed it every datagram the client sends before the server answers. The first Initial packet
 /// fixes the version and Destination Connection ID, and later Initial packets must match them.
-/// CRYPTO frames may arrive in any order, across packets and datagrams, and may repeat.
+/// CRYPTO frames may arrive in any order, across packets and datagrams, and may repeat. If
+/// a repeat has other bytes than the first copy, the assembler gives up for good
+/// ([`Error::CryptoConflict`]): the server's QUIC stack may have kept either copy, and a
+/// ClientHello that it did not read must not be reported.
 /// Memory stays under [`MAX_CRYPTO_LEN`] plus one datagram, and while the start of the stream is
 /// missing, under a few KiB.
 #[derive(Default)]
@@ -115,6 +118,8 @@ pub struct InitialAssembler {
     crypto: CryptoStream,
     datagram_sizes: Vec<usize>,
     complete: bool,
+    /// Two copies of the same CRYPTO bytes differed; every later `push` fails.
+    conflict: bool,
 }
 
 struct Connection {
@@ -162,41 +167,70 @@ impl InitialAssembler {
     /// not decrypt, an Initial packet belongs to another connection, a frame is not allowed in
     /// an Initial packet, the CRYPTO stream does not start with a ClientHello, the data exceeds
     /// [`MAX_CRYPTO_LEN`], a CRYPTO frame starts far beyond the bytes received so far, or the
-    /// stream is in too many separate pieces. CRYPTO data from packets before the failing one is kept.
+    /// stream is in too many separate pieces. CRYPTO data from packets before the failing one
+    /// is kept, and when an Initial packet of the datagram was read before the failing packet,
+    /// the datagram counts and there is no error: a QUIC stack, too, handles the packets in
+    /// front of a malformed one and drops the rest.
+    ///
+    /// [`Error::CryptoConflict`] when CRYPTO data differs from an earlier copy of the same
+    /// bytes; every later call then returns it again.
     pub fn push(&mut self, datagram: &[u8]) -> Result<Option<ClientInitial>, Error> {
+        if self.conflict {
+            return Err(Error::CryptoConflict);
+        }
         if self.complete {
             return Ok(None);
         }
         let mut rest = datagram;
-        let mut saw_initial = false;
-        while let Some((packet, next)) = packet::split_long_packet(rest)? {
-            rest = next;
-            if !packet.is_initial {
-                continue;
-            }
-            saw_initial = true;
-            let connection = self.connection.get_or_insert_with(|| Connection {
-                version: packet.version,
-                dcid: packet.dcid.to_vec(),
-                scid: packet.scid.to_vec(),
-                token_len: packet.token_len,
-                keys: packet::client_initial_keys(packet.version, packet.dcid),
-            });
-            if connection.version != packet.version || connection.dcid != packet.dcid {
-                return Err(Error::ConnectionChanged);
-            }
-            let payload = packet.decrypt(&connection.keys)?;
-            for crypto in frame::crypto_frames(&payload)? {
-                self.crypto.insert(crypto.offset, crypto.data)?;
+        let mut read_initial = false;
+        loop {
+            match self.push_packet(&mut rest) {
+                Ok(Some(PacketKind::Initial)) => read_initial = true,
+                Ok(Some(PacketKind::Other)) => {}
+                Ok(None) => break,
+                Err(Error::CryptoConflict) => {
+                    self.conflict = true;
+                    self.crypto = CryptoStream::default();
+                    return Err(Error::CryptoConflict);
+                }
+                Err(_) if read_initial => break,
+                Err(error) => return Err(error),
             }
         }
-        if !saw_initial {
+        if !read_initial {
             return Err(Error::NoInitialPacket);
         }
         if self.datagram_sizes.len() < MAX_DATAGRAM_SIZES {
             self.datagram_sizes.push(datagram.len());
         }
         self.finish()
+    }
+
+    /// Reads the long-header packet at the start of `rest` and moves `rest` past it; `None`
+    /// at the end of the datagram. An Initial packet's CRYPTO frames are stored.
+    fn push_packet(&mut self, rest: &mut &[u8]) -> Result<Option<PacketKind>, Error> {
+        let Some((packet, next)) = packet::split_long_packet(rest)? else {
+            return Ok(None);
+        };
+        *rest = next;
+        if !packet.is_initial {
+            return Ok(Some(PacketKind::Other));
+        }
+        let connection = self.connection.get_or_insert_with(|| Connection {
+            version: packet.version,
+            dcid: packet.dcid.to_vec(),
+            scid: packet.scid.to_vec(),
+            token_len: packet.token_len,
+            keys: packet::client_initial_keys(packet.version, packet.dcid),
+        });
+        if connection.version != packet.version || connection.dcid != packet.dcid {
+            return Err(Error::ConnectionChanged);
+        }
+        let payload = packet.decrypt(&connection.keys)?;
+        for crypto in frame::crypto_frames(&payload)? {
+            self.crypto.insert(crypto.offset, crypto.data)?;
+        }
+        Ok(Some(PacketKind::Initial))
     }
 
     fn finish(&mut self) -> Result<Option<ClientInitial>, Error> {
@@ -221,6 +255,13 @@ impl InitialAssembler {
             client_hello,
         }))
     }
+}
+
+/// What [`InitialAssembler::push_packet`] read.
+enum PacketKind {
+    Initial,
+    /// 0-RTT or Handshake, which are skipped.
+    Other,
 }
 
 /// The client's Initial-level CRYPTO stream, filled in by offset.
@@ -258,6 +299,17 @@ impl CryptoStream {
         // sorted and merged, so two binary searches find them.
         let first = self.ranges.partition_point(|r| r.end < range.start);
         let last = self.ranges.partition_point(|r| r.start <= range.end);
+        // A retransmission repeats the bytes (RFC 9000 section 2.2). Anything else is not
+        // taken: which copy a receiver keeps is its own business.
+        for held in &self.ranges[first..last] {
+            let both = range.start.max(held.start)..range.end.min(held.end);
+            if both.start < both.end
+                && self.data[both.clone()]
+                    != bytes[both.start - range.start..both.end - range.start]
+            {
+                return Err(Error::CryptoConflict);
+            }
+        }
         if first == last && self.ranges.len() >= MAX_CRYPTO_RANGES {
             return Err(Error::TooManyCryptoRanges);
         }
@@ -321,6 +373,26 @@ mod tests {
         assert_eq!(stream.contiguous_len(), 11);
         assert_eq!(stream.data, b"hello world");
         assert_eq!(stream.ranges, vec![Range { start: 0, end: 11 }]);
+    }
+
+    #[test]
+    fn crypto_stream_refuses_other_bytes_for_what_it_has() {
+        let mut stream = CryptoStream::default();
+        stream.insert(0, b"hello").expect("in bounds");
+        stream.insert(8, b"rld").expect("in bounds");
+        // The same bytes again, whole or in part, and new bytes next to them.
+        stream.insert(0, b"hello").expect("a retransmission");
+        stream
+            .insert(3, b"lo wo")
+            .expect("the gap, with both ends repeated");
+        assert_eq!(stream.data, b"hello world");
+        assert_eq!(stream.insert(4, b"O"), Err(Error::CryptoConflict));
+        assert_eq!(stream.insert(9, b"lD!"), Err(Error::CryptoConflict));
+        assert_eq!(
+            stream.data, b"hello world",
+            "nothing of a refused frame is kept"
+        );
+        stream.insert(11, b"!").expect("new bytes are still taken");
     }
 
     #[test]

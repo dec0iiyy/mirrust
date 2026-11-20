@@ -37,6 +37,10 @@ pub enum Error {
     TooManyCryptoRanges,
     /// The CRYPTO stream starts with a handshake message other than ClientHello.
     NotClientHello(u8),
+    /// CRYPTO data differs from what was received before at the same offsets. RFC 9000
+    /// section 2.2 forbids that, and a receiver may keep either copy, so there is no telling
+    /// which ClientHello the server's QUIC stack read.
+    CryptoConflict,
 }
 
 impl fmt::Display for Error {
@@ -73,6 +77,9 @@ impl fmt::Display for Error {
             Self::TooManyCryptoRanges => f.write_str("crypto data arrives in too many pieces"),
             Self::NotClientHello(kind) => {
                 write!(f, "handshake message type {kind} is not a client hello")
+            }
+            Self::CryptoConflict => {
+                f.write_str("crypto data differs from an earlier copy of the same bytes")
             }
         }
     }

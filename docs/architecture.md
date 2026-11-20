@@ -401,6 +401,23 @@ directly.
   request is refused with `COMPRESSION_ERROR`; if it ends between fields, the request is
   answered from the fields in the fragment. A client splits a header block that is larger than
   16,384 bytes after HPACK, which takes some 20 KB of cookies or other headers.
+- **The HTTP/3 GOAWAY names the last answered request.** After the 100th request the server
+  calls `h3::server::Connection::shutdown(0)`, which sends GOAWAY with the id of the last
+  stream it accepted. RFC 9114 section 5.2 reads that id as the first request that was
+  *not* processed, so formally the 100th request, which was answered in full before the frame
+  went out, is declared unprocessed. A client has its response by then and has nothing to send
+  again; the report it got is not affected. `shutdown(1)` would send the id after it, but h3
+  0.0.8 compares incoming streams with `>` and would then also accept the 101st request, which
+  the frame says is rejected. Left as it is until h3 has the comparison the RFC has.
+- **What the QUIC sniffer does not report.** The sniffer reads the same datagrams as quinn, and
+  three rules keep it from reporting a ClientHello that quinn did not read: a datagram under
+  1200 bytes does not start an assembly, because quinn ignores one that would open a connection
+  (RFC 9000 section 14.1); CRYPTO data that differs from an earlier copy of the same bytes ends
+  the assembly for good (`quic::Error::CryptoConflict`), because a receiver may keep either
+  copy and quinn's choice depends on offsets and sizes; and a malformed packet behind an
+  Initial packet in one datagram does not cost the packets in front of it, as in quinn. In the
+  second case the connection is served and its report has `"tls": null`. No honest client
+  sends either.
 - **QUIC limits.** Packet numbers are decoded as if nothing was acknowledged (true for a client's
   first flight); Retry and Version Negotiation packets are ignored and only the length of the
   token is reported; no draft versions. The `quic` object covers the first flight only: nothing

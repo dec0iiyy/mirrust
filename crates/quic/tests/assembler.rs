@@ -240,3 +240,82 @@ fn a_hello_in_many_pieces_with_gaps_still_reassembles() {
     }
     assert!(assembler.is_complete());
 }
+
+#[test]
+fn other_bytes_for_crypto_data_already_received_end_the_assembly_for_good() {
+    let hello = rfc_client_hello();
+    let dcid = [7u8; 8];
+    let mut assembler = InitialAssembler::new();
+    let first = seal(
+        Version::V1,
+        0,
+        &dcid,
+        &[],
+        0,
+        &crypto_frame(0, &hello[..100]),
+    );
+    assert_eq!(assembler.push(&first), Ok(None));
+
+    // The first 100 bytes again with another cipher suite list, and the rest: a server's QUIC
+    // stack may hand its TLS code either copy of the start (RFC 9000 section 2.2 forbids
+    // sending this), so no ClientHello is reported for the connection.
+    let mut decoy = hello.clone();
+    decoy[50] ^= 0xff;
+    let second = seal(Version::V1, 0, &dcid, &[], 1, &crypto_frame(0, &decoy));
+    assert_eq!(assembler.push(&second), Err(Error::CryptoConflict));
+    assert!(!assembler.is_complete());
+
+    // Not even from an honest copy afterwards.
+    let third = seal(Version::V1, 0, &dcid, &[], 2, &crypto_frame(0, &hello));
+    assert_eq!(assembler.push(&third), Err(Error::CryptoConflict));
+}
+
+#[test]
+fn a_retransmitted_crypto_frame_with_the_same_bytes_is_fine() {
+    let hello = rfc_client_hello();
+    let dcid = [7u8; 8];
+    let mut assembler = InitialAssembler::new();
+    let first = seal(
+        Version::V1,
+        0,
+        &dcid,
+        &[],
+        0,
+        &crypto_frame(0, &hello[..100]),
+    );
+    assert_eq!(assembler.push(&first), Ok(None));
+    assert_eq!(assembler.push(&first), Ok(None));
+    let second = seal(Version::V1, 0, &dcid, &[], 1, &crypto_frame(0, &hello));
+    let initial = assembler
+        .push(&second)
+        .expect("no conflict")
+        .expect("complete");
+    assert_eq!(initial.client_hello(), hello);
+}
+
+#[test]
+fn a_malformed_packet_behind_an_initial_does_not_cost_the_client_hello() {
+    let hello = rfc_client_hello();
+    let dcid = [7u8; 8];
+    let mut datagram = seal(Version::V1, 0, &dcid, &[], 0, &crypto_frame(0, &hello));
+    // A long header of QUIC v1 that ends inside its connection ID.
+    datagram.extend([0xc0, 0, 0, 0, 1, 20, 1, 2, 3]);
+    let initial = InitialAssembler::new()
+        .push(&datagram)
+        .expect("the Initial packet in front was read")
+        .expect("and it holds the whole ClientHello");
+    assert_eq!(initial.client_hello(), hello);
+    assert_eq!(initial.datagram_sizes(), [datagram.len()]);
+
+    // In front of the Initial packet it is an error, as before.
+    let mut reversed = vec![0xc0, 0, 0, 0, 1, 20, 1, 2, 3];
+    reversed.extend(seal(
+        Version::V1,
+        0,
+        &dcid,
+        &[],
+        0,
+        &crypto_frame(0, &hello),
+    ));
+    assert!(InitialAssembler::new().push(&reversed).is_err());
+}

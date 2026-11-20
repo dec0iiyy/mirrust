@@ -42,6 +42,10 @@ struct Tables {
     complete: Table<(SocketAddr, Vec<u8>), ClientInitial>,
 }
 
+/// The smallest UDP payload that may carry a client's first Initial packet (RFC 9000 section
+/// 14.1); `MIN_INITIAL_SIZE` in quinn.
+const MIN_INITIAL_DATAGRAM: usize = 1200;
+
 impl ClientHellos {
     /// Feeds one received datagram to the peer's assembler.
     fn observe(&self, from: SocketAddr, datagram: &[u8]) {
@@ -63,6 +67,14 @@ impl ClientHellos {
             }
             finished
         } else {
+            // quinn ignores a datagram under 1200 bytes that would open a connection, as RFC
+            // 9000 section 14.1 requires of a server. A ClientHello in one must not be
+            // reported: the client could follow it with another, full-sized, that quinn
+            // then reads. Datagrams of a connection that is already known are not held to
+            // the size, here or in quinn.
+            if datagram.len() < MIN_INITIAL_DATAGRAM {
+                return;
+            }
             // Nothing is stored for a datagram that holds no Initial packet or does not
             // decrypt: a Handshake or 0-RTT datagram, or garbage.
             let mut assembler = InitialAssembler::new();
@@ -248,8 +260,19 @@ mod tests {
         (Ipv4Addr::from(0x0a00_0000 + n), 40_000).into()
     }
 
-    /// A client Initial packet carrying `frames`, sealed with the public Initial keys.
+    /// A client Initial packet carrying `frames`, sealed with the public Initial keys and
+    /// padded with PADDING frames to the 1200 bytes a client's Initial datagram must have.
     fn initial(dcid: &[u8], frames: &[u8]) -> Vec<u8> {
+        // The header is 14 bytes and the connection ID; the AEAD tag is 16.
+        let mut padded = frames.to_vec();
+        padded.resize(frames.len().max(MIN_INITIAL_DATAGRAM - 30 - dcid.len()), 0);
+        let datagram = short_initial(dcid, &padded);
+        assert!(datagram.len() >= MIN_INITIAL_DATAGRAM);
+        datagram
+    }
+
+    /// Like [`initial`], without the padding.
+    fn short_initial(dcid: &[u8], frames: &[u8]) -> Vec<u8> {
         let keys = rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256
             .tls13()
             .and_then(rustls::Tls13CipherSuite::quic_suite)
@@ -303,6 +326,46 @@ mod tests {
     fn lens(hellos: &ClientHellos) -> (usize, usize) {
         let tables = hellos.tables.lock().expect("lock");
         (tables.pending.len(), tables.complete.len())
+    }
+
+    #[test]
+    fn a_client_hello_in_an_undersized_first_datagram_is_not_reported() {
+        let hellos = ClientHellos::default();
+        let now = Instant::now();
+        let dcid = [5; 8];
+        let mut decoy = hello();
+        decoy[10] ^= 0xff;
+
+        // quinn drops this datagram: it is under 1200 bytes and opens a connection.
+        let small = short_initial(&dcid, &crypto_frame(0, &decoy));
+        assert!(small.len() < MIN_INITIAL_DATAGRAM);
+        hellos.observe_at(peer(1), &small, now);
+        assert_eq!(lens(&hellos), (0, 0), "nothing is kept of it");
+
+        // The ClientHello quinn reads is the one in the datagram of full size.
+        hellos.observe_at(peer(1), &initial(&dcid, &crypto_frame(0, &hello())), now);
+        let found = hellos.take(peer(1), &dcid).expect("tracked");
+        assert_eq!(found.client_hello(), hello());
+    }
+
+    #[test]
+    fn later_datagrams_of_a_known_connection_may_be_small() {
+        let hellos = ClientHellos::default();
+        let now = Instant::now();
+        let dcid = [6; 8];
+        let message = hello();
+        hellos.observe_at(
+            peer(1),
+            &initial(&dcid, &crypto_frame(0, &message[..10])),
+            now,
+        );
+        // quinn does not hold a connection it already has to the size.
+        let rest = short_initial(&dcid, &crypto_frame(10, &message[10..]));
+        hellos.observe_at(peer(1), &rest, now);
+        assert_eq!(
+            hellos.take(peer(1), &dcid).expect("tracked").client_hello(),
+            message
+        );
     }
 
     #[test]
