@@ -210,13 +210,26 @@ identity and stored by GitHub, that this repository's workflow built a file with
 digest. With the [GitHub CLI](https://cli.github.com/):
 
 ```console
-$ gh attestation verify mirrust-linux-x86_64 --repo dec0iiyy/mirrust
+$ gh attestation verify mirrust-linux-x86_64 --repo dec0iiyy/mirrust \
+    --signer-workflow dec0iiyy/mirrust/.github/workflows/release.yml
 ```
 
-To insist on this workflow and not any workflow of the repository, add
-`--signer-workflow dec0iiyy/mirrust/.github/workflows/release.yml`. The same works for the
-archives. The action is `actions/attest-build-provenance` v4, pinned by commit in the
-workflow, which since version 4 is a thin wrapper around `actions/attest`.
+`--signer-workflow` insists on the release workflow; without it an attestation from any
+workflow of the repository passes. Tried on the 0.1.1 release with gh 2.105.0 and its output
+piped: for `mirrust-macos-arm64` the command printed nothing, which is what gh does when it
+succeeds without a terminal (the exit status was not recorded), and with another workflow's
+path in its place it failed with `Error: verifying with issuer "sigstore.dev"` and exit
+status 1. The same works for the archives. The action is `actions/attest-build-provenance` v4, pinned by
+commit in the workflow, which since version 4 is a thin wrapper around `actions/attest`.
+
+`install.sh` runs this command when `gh` is installed and reports one of four things: `gh` is
+missing or older than 2.49 (no `attestation` command); `gh` is not signed in or cannot reach
+GitHub; `attestation ok`; or a `WARNING` with gh's own error text when the verification
+failed. gh exits with status 1 for every failure, so the script tells the first two apart
+before it verifies (`gh attestation verify --help`, `gh auth status`). None of the four stops
+the install: the script is downloaded from the same release as the binary, so a check inside
+it cannot protect against a replaced release, and the command above, run by you, is the one
+to rely on.
 
 ## What has been exercised
 

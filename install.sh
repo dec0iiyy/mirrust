@@ -17,15 +17,27 @@
 # What it does, in order: detect the system with uname; download the binary and SHA256SUMS
 # into a temporary directory that is removed on exit; verify the checksum, and stop without
 # installing anything if it does not match; run `gh attestation verify` if gh is installed,
-# and report the result (a missing or failing gh never blocks the install); install the
-# binary with mode 0755. If the directory is not writable it uses sudo for that last step
-# only, and if there is no sudo either and --prefix was not given it installs into
-# $HOME/.local/bin. It never needs root otherwise.
+# and report the result (it never blocks the install, see below); install the binary with
+# mode 0755. If the directory is not writable it uses sudo for that last step only, and if
+# there is no sudo either and --prefix was not given it installs into $HOME/.local/bin. It
+# never needs root otherwise.
 #
 # The checksum file comes from the same place as the binary, so the check catches a damaged
 # or truncated download, not a compromised release. The attestation, signed by this
 # repository's release workflow, is the check that does: `gh attestation verify FILE --repo
-# dec0iiyy/mirrust`.
+# dec0iiyy/mirrust --signer-workflow dec0iiyy/mirrust/.github/workflows/release.yml`.
+#
+# This script runs that command when it can and says which of four things happened: gh is
+# missing or too old, gh is not signed in, the file is attested, or the verification failed.
+# A failure is a warning with gh's own words, not a stop. This script comes from the same
+# release as the binary, so whoever could replace the binary could replace the check too:
+# the verification that counts is the one you run yourself on a file you downloaded
+# (docs/releasing.md, "Verify a download").
+#
+# The file that sudo installs is the one that was verified, in a directory that mktemp made
+# for the invoking user alone (mode 0700). Only a process of that user, or root, could swap
+# it between the check and the install, and such a process can already change what sudo is
+# asked to run. Hashing the file again as root would not change that, so it is not done.
 #
 # Everything is inside functions and `main "$@"` is the last line: a download cut short
 # runs nothing.
@@ -34,6 +46,9 @@ set -eu
 
 REPO=dec0iiyy/mirrust
 RELEASES_PAGE=https://github.com/$REPO/releases
+# The workflow whose signature an attested release file carries. Without it, an attestation
+# from any workflow of the repository would pass.
+SIGNER_WORKFLOW=$REPO/.github/workflows/release.yml
 
 say() {
     printf '%s\n' "mirrust install: $*"
@@ -176,16 +191,34 @@ verify_checksum() {
     say "checksum ok: $asset matches SHA256SUMS"
 }
 
-# Reports the result of gh attestation verify. Never stops the install.
+# Reports the result of gh attestation verify. Never stops the install (see the top of this
+# file for why). gh exits with 1 for every kind of failure, so the cases that are not a
+# verdict on the file are told apart before the verification is run.
 check_attestation() {
+    verify="gh attestation verify $asset --repo $REPO --signer-workflow $SIGNER_WORKFLOW"
     if [ -n "${MIRRUST_BASE_URL:-}" ]; then
         say "note: attestation not checked, because MIRRUST_BASE_URL replaces the release URL"
     elif ! have gh; then
-        say "note: gh is not installed, so the build provenance was not checked (gh attestation verify $asset --repo $REPO)"
-    elif gh attestation verify "$tmp/$asset" --repo "$REPO" >/dev/null 2>&1; then
+        say "note: gh is not installed, so the build provenance was not checked ($verify)"
+    elif ! gh attestation verify --help 2>/dev/null | grep -q -e --signer-workflow; then
+        # gh before 2.49 has no attestation command.
+        say "note: this gh is too old to verify attestations, so the build provenance was not checked (update gh, then: $verify)"
+    elif ! gh auth status >/dev/null 2>&1; then
+        say "note: gh is not signed in or cannot reach GitHub, so the build provenance was not checked (gh auth login, then: $verify)"
+    elif reason=$(gh attestation verify "$tmp/$asset" --repo "$REPO" \
+        --signer-workflow "$SIGNER_WORKFLOW" 2>&1 >/dev/null); then
         say "attestation ok: gh attestation verify confirms that $REPO's release workflow built this file"
     else
-        say "note: gh attestation verify did not succeed (not signed in, offline, or a release without provenance); the checksum matched, so continuing"
+        {
+            printf '%s\n' "mirrust install: WARNING: gh attestation verify FAILED for $asset"
+            printf '%s\n' "$reason" | sed -n '1,5s/^/  gh: /p'
+            printf '%s\n' "  The checksum matched, which shows only that the download is intact. gh could not"
+            printf '%s\n' "  confirm that $REPO's release workflow built this file: there is no"
+            printf '%s\n' "  attestation for it, it was signed by something else, or GitHub could not be asked."
+            printf '%s\n' "  The install goes on. If you did not expect this, do not run the binary; download"
+            printf '%s\n' "  the file from $RELEASES_PAGE and run:"
+            printf '%s\n' "    $verify"
+        } >&2
     fi
 }
 

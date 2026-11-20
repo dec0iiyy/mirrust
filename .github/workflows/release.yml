@@ -342,7 +342,7 @@ jobs:
           The files also carry signed build provenance, which proves that this repository's release workflow built them:
 
           \`\`\`console
-          $ gh attestation verify mirrust-linux-x86_64 --repo $GH_REPO
+          $ gh attestation verify mirrust-linux-x86_64 --repo $GH_REPO --signer-workflow $GH_REPO/.github/workflows/release.yml
           \`\`\`
 
           The bare binaries need \`chmod +x\` after the download. The \`.tar.gz\` archives hold the binary, \`LICENSE\`, \`NOTICE\`, \`THIRD-PARTY-LICENSES.md\`, \`README.md\` and \`deploy/mirrust.service\`; the Windows \`.zip\` holds \`mirrust.exe\`, \`LICENSE\`, \`NOTICE\`, \`THIRD-PARTY-LICENSES.md\` and \`README.md\`. The Windows build is for local testing.

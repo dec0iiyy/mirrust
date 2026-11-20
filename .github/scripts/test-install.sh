@@ -375,6 +375,75 @@ status=$?
 check "a script cut before main runs nothing" sh -c \
     "[ $status -eq 0 ] && [ ! -s '$work/out' ] && [ ! -e '$work/bin12' ]"
 
+# --- the attestation report ---
+
+# check_attestation runs only for a real release, so it is called on its own here: the
+# script without its last line, then the variables the function reads, then the call. gh is
+# a stub whose answers come from GH_HELP, GH_AUTH and GH_VERIFY, and which logs its arguments.
+mkdir -p "$work/gh" "$work/nogh"
+cat >"$work/gh/gh" <<EOF
+#!/bin/sh
+echo "\$*" >>"$work/gh.log"
+case "\$*" in
+    "attestation verify --help")
+        [ "\${GH_HELP:-new}" = new ] || { echo 'unknown command "attestation" for "gh"' >&2; exit 1; }
+        echo "  --signer-workflow string   Workflow that signed attestation"
+        ;;
+    "auth status") [ "\${GH_AUTH:-in}" = in ] ;;
+    "attestation verify "*)
+        [ "\${GH_VERIFY:-ok}" = ok ] || { echo 'Error: verifying with issuer "sigstore.dev"' >&2; exit 1; }
+        ;;
+    *) exit 2 ;;
+esac
+EOF
+chmod 755 "$work/gh/gh"
+for tool in sh sed grep printf cat; do
+    if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
+        ln -sf "$found" "$work/nogh/$tool"
+    fi
+done
+{
+    sed '$d' "$script"
+    echo 'asset=mirrust-linux-x86_64'
+    echo 'tmp=/nonexistent'
+    echo 'check_attestation'
+    echo 'echo "went on"'
+} >"$work/attest.sh"
+
+# run_attestation PATH [ENV=VALUE...]: output in $work/out, status in $status.
+run_attestation() {
+    path=$1
+    shift
+    : >"$work/gh.log"
+    env PATH="$path" "$@" sh "$work/attest.sh" >"$work/out" 2>&1
+    status=$?
+}
+
+run_attestation "$work/nogh"
+check "attestation: without gh, a note" sh -c \
+    "[ $status -eq 0 ] && grep -q 'note: gh is not installed' '$work/out'"
+
+run_attestation "$work/gh:$work/nogh" GH_HELP=old
+check "attestation: a gh without the attestation command is called too old" sh -c \
+    "[ $status -eq 0 ] && grep -q 'note: this gh is too old' '$work/out' && ! grep -q '^auth status' '$work/gh.log'"
+
+run_attestation "$work/gh:$work/nogh" GH_AUTH=out
+check "attestation: a gh that is not signed in is a note, and nothing is verified" sh -c \
+    "[ $status -eq 0 ] && grep -q 'note: gh is not signed in' '$work/out' && ! grep -q '^attestation verify /' '$work/gh.log'"
+
+run_attestation "$work/gh:$work/nogh"
+check "attestation: a verified file is reported ok" sh -c \
+    "[ $status -eq 0 ] && grep -q '^mirrust install: attestation ok' '$work/out'"
+check "attestation: the release workflow is the required signer" grep -q -x -F \
+    "attestation verify /nonexistent/mirrust-linux-x86_64 --repo dec0iiyy/mirrust --signer-workflow dec0iiyy/mirrust/.github/workflows/release.yml" \
+    "$work/gh.log"
+
+run_attestation "$work/gh:$work/nogh" GH_VERIFY=fail
+check "attestation: a failed verification is a warning with gh's words" sh -c \
+    "grep -q 'WARNING: gh attestation verify FAILED for mirrust-linux-x86_64' '$work/out' && grep -q '  gh: Error: verifying with issuer' '$work/out'"
+check "attestation: a failed verification is not called a note, and the install goes on" sh -c \
+    "[ $status -eq 0 ] && ! grep -q 'note:' '$work/out' && grep -q -x 'went on' '$work/out'"
+
 # --- where it installs when the prefix is not writable ---
 
 if [ "$(id -u)" -eq 0 ]; then
