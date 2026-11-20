@@ -22,7 +22,10 @@ use tokio::net::TcpListener;
 const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
                   [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
                   [--cors-key KEY] [--log PATH] [--max-connections N]
+       mirrust --version
 
+  -h, --help         print this text and exit
+  -V, --version      print the version and exit
   --listen           address to listen on, TCP and UDP for HTTP/3 (default 127.0.0.1:8443,
                      0.0.0.0:443 with --domain)
   --cert/--key       PEM certificate chain and private key; without them, and without
@@ -79,6 +82,12 @@ struct Args {
 enum Command {
     Run(Box<Args>),
     Help,
+    Version,
+}
+
+/// The text `--version` prints.
+fn version_line() -> String {
+    format!("mirrust {}", env!("CARGO_PKG_VERSION"))
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> {
@@ -95,6 +104,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command>
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "-h" | "--help" => return Ok(Command::Help),
+            "-V" | "--version" => return Ok(Command::Version),
             "--acme-staging" => {
                 acme_staging = true;
                 continue;
@@ -267,6 +277,10 @@ async fn main() -> anyhow::Result<()> {
             println!("{USAGE}");
             return Ok(());
         }
+        Command::Version => {
+            println!("{}", version_line());
+            return Ok(());
+        }
         Command::Run(args) => *args,
     };
     let acme = args.acme.take().map(prepare_acme).transpose()?;
@@ -355,6 +369,7 @@ mod tests {
         match parse_args(args.iter().map(|&arg| arg.to_owned()))? {
             Command::Run(args) => Ok(*args),
             Command::Help => bail!("help"),
+            Command::Version => bail!("version"),
         }
     }
 
@@ -382,6 +397,25 @@ mod tests {
         assert!(matches!(
             parse_args(["--help".to_owned()]).expect("help"),
             Command::Help
+        ));
+    }
+
+    #[test]
+    fn version_flags_ask_for_the_version() {
+        for flag in ["--version", "-V"] {
+            assert!(
+                matches!(
+                    parse_args([flag.to_owned()]).expect("version"),
+                    Command::Version
+                ),
+                "{flag}"
+            );
+        }
+        // Like --help, it wins over whatever follows or precedes it.
+        let with_others = ["--listen", "0.0.0.0:443", "-V", "--bogus"];
+        assert!(matches!(
+            parse_args(with_others.map(str::to_owned)).expect("version"),
+            Command::Version
         ));
     }
 
