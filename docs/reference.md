@@ -207,6 +207,19 @@ warning.
   not start the waits over. A certificate is renewed 30 days before it ends, or a third of its lifetime before it ends if
   that is shorter, but never sooner than an hour after the last order, so a host clock that is far off
   cannot make it order in a loop.
+- The CA gets 90 seconds to validate the names and 90 more to issue; then the attempt
+  fails with `the CA had not finished validating after 90 seconds` and the challenge
+  certificates are removed, so a validation that arrives later fails too. (certbot waits as
+  long; the `instant-acme` library's own default is 30 seconds.)
+- If the CA answers that it does not know the saved account (`accountDoesNotExist`: the
+  staging environment was reset, or `--acme-dir` came from elsewhere), mirrust says so,
+  removes `account.json`, creates a new account and makes the order once more in the same
+  attempt.
+- The ACME client connects to the CA directly. It does not read `HTTPS_PROXY` or the other
+  proxy environment variables, because the HTTP client of `instant-acme` does not. On a
+  machine that reaches the internet only through a proxy, get the certificate with another
+  ACME client and use `--cert` and `--key`
+  ([deploy.md](deploy.md#alternative-certificate-files)).
 - A connection whose ClientHello offers ALPN `acme-tls/1` is the CA validating a name. It gets
   the challenge certificate, takes a connection slot like any connection, and is not written to
   the request log and not counted in the failure summary.
@@ -215,7 +228,10 @@ warning.
   `letsencrypt` or `letsencrypt-staging`) mode 0600. Key material is never printed.
 - `--domain auto` finds the local address of the default route without sending a packet, and
   refuses to start if it is loopback, private (RFC 1918), link-local, in `100.64.0.0/10` or
-  otherwise not routable. sslip.io is a free third-party DNS service.
+  otherwise not routable. sslip.io is a free third-party DNS service. For a name under
+  sslip.io, from `auto` or typed out, one more `acme:` line at start says that Let's Encrypt's
+  limits for it are shared with every other user of that service and that its operators
+  control where the name points.
 
 See [deploy.md](deploy.md#3-point-the-name-at-the-server-and-get-a-certificate) for the setup
 and for what is tested and what is not.

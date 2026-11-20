@@ -130,6 +130,18 @@ impl CertCache {
         write_private(&self.dir.join(ACCOUNT_FILE), json)
     }
 
+    /// Removes the saved account credentials, if there are any.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file exists and cannot be removed.
+    pub fn forget_account(&self) -> io::Result<()> {
+        match fs::remove_file(self.dir.join(ACCOUNT_FILE)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        }
+    }
+
     /// The saved certificate, if it was issued for exactly `names`.
     ///
     /// # Errors

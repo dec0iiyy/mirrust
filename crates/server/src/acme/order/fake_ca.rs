@@ -105,6 +105,8 @@ struct State {
     nonces: HashSet<String>,
     counter: u64,
     accounts: Vec<AccountRecord>,
+    /// Every request signed for an account is answered `accountDoesNotExist`.
+    accounts_refused: bool,
     authzs: Vec<AuthzRecord>,
     orders: Vec<OrderRecord>,
     /// One word per request that changed something, in order, for the tests to read.
@@ -150,6 +152,7 @@ impl FakeCa {
                 nonces: HashSet::new(),
                 counter: 0,
                 accounts: Vec::new(),
+                accounts_refused: false,
                 authzs: Vec::new(),
                 orders: Vec::new(),
                 log: Vec::new(),
@@ -185,6 +188,16 @@ impl FakeCa {
     /// Issues certificates that are valid from January 1st of `from` until `until`.
     pub(super) fn set_certificate_years(&self, from: i32, until: i32) {
         self.state().years = (from, until);
+    }
+
+    /// Forgets every account, as a CA does when its database is reset.
+    pub(super) fn forget_accounts(&self) {
+        self.state().accounts.clear();
+    }
+
+    /// From now on no account is known, a new one included.
+    pub(super) fn refuse_accounts(&self) {
+        self.state().accounts_refused = true;
     }
 
     /// The next `count` requests are answered `badNonce`.
@@ -278,7 +291,8 @@ impl FakeCa {
             };
             return Self::new_account(state, jwk, &payload_text);
         }
-        if key_id != Some(&format!("{BASE}/acct/1")) || state.accounts.is_empty() {
+        let known = !state.accounts.is_empty() && !state.accounts_refused;
+        if key_id != Some(&format!("{BASE}/acct/1")) || !known {
             return Reply::problem(state, 400, "accountDoesNotExist", "unknown account");
         }
         let (resource, index) = path
@@ -857,6 +871,7 @@ impl Harness {
             cache: CertCache::open(&dir, authority).expect("cache"),
             certs,
             challenges,
+            ca_wait: CA_WAIT,
             http: Some(ca.factory()),
         };
         Self {
@@ -985,6 +1000,89 @@ async fn a_certificate_that_is_already_due_for_renewal_is_not_ordered_again_in_a
         .filter(|&&entry| entry == "new-order")
         .count();
     assert_eq!(orders, 1, "one order, then a wait: {:?}", ca.log());
+}
+
+#[tokio::test]
+async fn an_account_the_ca_no_longer_knows_is_replaced_and_the_order_made_again() {
+    let harness = Harness::new("lost-account", &["a.mirror.test"]).await;
+    harness.client.attempt().await.expect("issued");
+    let saved = harness.client.cache.account().expect("read");
+    assert!(saved.is_some(), "the account is saved");
+
+    // A reset of the CA, as Let's Encrypt's staging environment has them.
+    harness.ca.forget_accounts();
+    harness
+        .client
+        .attempt()
+        .await
+        .expect("issued with a new account, in the same attempt");
+    let log = harness.ca.log();
+    assert_eq!(
+        log.iter().filter(|&&entry| entry == "new-account").count(),
+        2,
+        "{log:?}"
+    );
+    assert_eq!(
+        log.iter().filter(|&&entry| entry == "new-order").count(),
+        2,
+        "the order the CA refused is not in its log: {log:?}"
+    );
+    let replaced = harness.client.cache.account().expect("read");
+    assert!(
+        replaced.is_some() && replaced != saved,
+        "a new account is saved"
+    );
+}
+
+#[tokio::test]
+async fn an_account_refused_twice_fails_the_attempt_instead_of_looping() {
+    let harness = Harness::new("refused-account", &["a.mirror.test"]).await;
+    harness.client.attempt().await.expect("issued");
+    harness.ca.forget_accounts();
+    harness.ca.refuse_accounts();
+    let error = harness.client.attempt().await.expect_err("no account");
+    let text = format!("{error:#}");
+    assert!(text.contains("accountDoesNotExist"), "{text}");
+    let log = harness.ca.log();
+    assert_eq!(
+        log.iter().filter(|&&entry| entry == "new-account").count(),
+        2,
+        "one new account, one more try, and no third: {log:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_ca_that_does_not_finish_validating_fails_the_attempt_after_the_wait() {
+    let mut harness = Harness::new("slow-ca", &["a.mirror.test"]).await;
+    harness.ca.set_validation(Validation::Hang);
+    harness.client.ca_wait = Duration::from_millis(600);
+    let started = std::time::Instant::now();
+    let error = harness.client.attempt().await.expect_err("not validated");
+    let text = format!("{error:#}");
+    assert!(
+        text.contains("the CA had not finished validating after 0 seconds (the order is "),
+        "{text}"
+    );
+    // Not the 30 seconds of instant-acme's default policy, and not the attempt's 10 minutes.
+    assert!(started.elapsed() < Duration::from_secs(10), "{text}");
+    assert!(harness.client.challenges.is_empty());
+}
+
+#[test]
+fn a_name_under_sslip_io_gets_a_note_at_start_and_other_names_do_not() {
+    let names = |names: &[&str]| -> Vec<String> { names.iter().map(|&n| n.to_owned()).collect() };
+    let note = shared_domain_note(&names(&["mirror.example.com", "203-0-113-7.sslip.io"]))
+        .expect("a note");
+    assert!(
+        note.starts_with("203-0-113-7.sslip.io is a name under sslip.io"),
+        "{note}"
+    );
+    assert!(note.contains("--acme-staging"), "{note}");
+    assert_eq!(shared_domain_note(&names(&["mirror.example.com"])), None);
+    assert_eq!(
+        shared_domain_note(&names(&["notsslip.io", "sslip.io.example.com"])),
+        None
+    );
 }
 
 #[tokio::test]

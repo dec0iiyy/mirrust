@@ -36,6 +36,17 @@ const LONGEST_RETRY: Duration = Duration::from_secs(6 * 3600);
 /// certificates per week for the same names.
 const MIN_RENEWAL_GAP: Duration = Duration::from_secs(3600);
 
+/// How long the CA gets to validate the names, and then to issue the certificate, before the
+/// attempt counts as failed. Let's Encrypt answers within seconds, but it validates from
+/// several places and a slow path to one of them takes longer. `instant-acme` waits 30 seconds
+/// by default; certbot waits 90. When the wait ends the challenge certificates are removed, so
+/// a CA that is still validating then fails the order.
+const CA_WAIT: Duration = Duration::from_secs(90);
+
+/// The problem type of a CA that does not know the account a request was signed for
+/// (RFC 8555 section 6.7).
+const ACCOUNT_DOES_NOT_EXIST: &str = "urn:ietf:params:acme:error:accountDoesNotExist";
+
 /// The longest single sleep. A long wait is cut into pieces and the wall clock is read after
 /// each, because timers do not run while the machine is suspended.
 const SLEEP_STEP: Duration = Duration::from_secs(12 * 3600);
@@ -68,6 +79,7 @@ pub fn start(
         cache,
         certs,
         challenges,
+        ca_wait: CA_WAIT,
         #[cfg(test)]
         http: None,
     };
@@ -75,6 +87,9 @@ pub fn start(
         "acme: --domain means you accept the Let's Encrypt Subscriber Agreement, \
          {SUBSCRIBER_AGREEMENT_URL}"
     );
+    if let Some(note) = shared_domain_note(&client.settings.names) {
+        eprintln!("acme: {note}");
+    }
     let names = client.names_text();
     let authority = client.settings.authority.label();
     let (renew_at, announced) = if let Some(validity) = client.install_cached() {
@@ -103,6 +118,8 @@ struct Client {
     cache: CertCache,
     certs: Arc<CurrentCert>,
     challenges: AcmeChallenges,
+    /// [`CA_WAIT`]; tests shorten it.
+    ca_wait: Duration,
     /// Tests give the account an in-process CA instead of the network.
     #[cfg(test)]
     http: Option<fake_ca::HttpFactory>,
@@ -293,8 +310,30 @@ impl Client {
         Ok(account)
     }
 
-    /// Orders the certificate and answers the validation of each name.
+    /// Orders the certificate. If the CA does not know the saved account, the account is
+    /// dropped and the order made once more, with a new one.
+    ///
+    /// A CA forgets accounts when it is reset, as Let's Encrypt's staging environment is from
+    /// time to time, and an `--acme-dir` can come from another machine. Without this, every
+    /// later attempt would fail the same way until someone deleted `account.json` by hand.
     async fn obtain(&self) -> anyhow::Result<StoredCert> {
+        match self.order().await {
+            Err(error) if is_unknown_account(&error) => {
+                eprintln!(
+                    "acme: {} no longer knows the saved account; creating a new one",
+                    self.settings.authority.label()
+                );
+                self.cache
+                    .forget_account()
+                    .context("removing the saved account")?;
+                self.order().await
+            }
+            result => result,
+        }
+    }
+
+    /// Orders the certificate and answers the validation of each name.
+    async fn order(&self) -> anyhow::Result<StoredCert> {
         let account = self.account().await?;
         let identifiers: Vec<Identifier> = self
             .settings
@@ -330,20 +369,56 @@ impl Client {
                 .context("telling the CA the challenge is ready")?;
         }
 
-        let status = order
-            .poll_ready(&RetryPolicy::default())
-            .await
-            .context("waiting for the validation")?;
+        let wait = RetryPolicy::new().timeout(self.ca_wait);
+        let status = match order.poll_ready(&wait).await {
+            Err(instant_acme::Error::Timeout(_)) => bail!(
+                "the CA had not finished validating after {} seconds (the order is {:?})",
+                self.ca_wait.as_secs(),
+                order.state().status
+            ),
+            status => status.context("waiting for the validation")?,
+        };
         if status != OrderStatus::Ready {
             bail!("validation failed: {}", rejection(&mut order).await);
         }
         let key_pem = order.finalize().await.context("finalizing the order")?;
-        let chain_pem = order
-            .poll_certificate(&RetryPolicy::default())
-            .await
-            .context("waiting for the certificate")?;
+        let chain_pem = match order.poll_certificate(&wait).await {
+            Err(instant_acme::Error::Timeout(_)) => bail!(
+                "the CA had not issued the certificate after {} seconds (the order is {:?})",
+                self.ca_wait.as_secs(),
+                order.state().status
+            ),
+            chain => chain.context("waiting for the certificate")?,
+        };
         Ok(StoredCert { chain_pem, key_pem })
     }
+}
+
+/// Whether `error` is the CA saying that it does not know the account.
+fn is_unknown_account(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<instant_acme::Error>(),
+            Some(instant_acme::Error::Api(problem))
+                if problem.r#type.as_deref() == Some(ACCOUNT_DOES_NOT_EXIST)
+        )
+    })
+}
+
+/// What to tell the operator at start when a name is under sslip.io, as `--domain auto` makes
+/// it: the limits and the DNS service are shared with strangers.
+fn shared_domain_note(names: &[String]) -> Option<String> {
+    let name = names.iter().find(|name| {
+        name.to_ascii_lowercase()
+            .trim_end_matches('.')
+            .ends_with(".sslip.io")
+    })?;
+    Some(format!(
+        "{name} is a name under sslip.io, a free third-party DNS service: Let's Encrypt counts \
+         its certificates against one limit for all of sslip.io, and whoever runs that service \
+         controls where the name points. Fine for a trial (add --acme-staging while you test); \
+         use a name of your own to keep a server"
+    ))
 }
 
 /// The certificate in `stored`, ready to sign with, and its validity dates.
@@ -584,6 +659,7 @@ mod tests {
             cache,
             certs: Arc::new(CurrentCert::new()),
             challenges: AcmeChallenges::new(),
+            ca_wait: CA_WAIT,
             http: None,
         };
         (client, base)

@@ -295,7 +295,9 @@ counts every `A-B-C-D.sslip.io` name as one registered domain with all other use
 service, and its limit of 50 certificates per registered domain per week is shared by them. The
 sslip.io operators say Let's Encrypt has raised their limit (to 250,000 a week, <https://nip.io>),
 but an order can still be refused for that reason; the error text then names the rate limit.
-For a server you keep, use a name of your own.
+For a server you keep, use a name of your own. mirrust prints this in one line when it starts
+with a name under sslip.io, and suggests `--acme-staging` while you try things out: staging has
+its own, much higher limits.
 
 **The cache.** `--acme-dir` is created with mode 0700 if it does not exist, and holds, in a
 subdirectory per CA, `account.json` (the ACME account key), `private-key.pem`,
@@ -324,7 +326,10 @@ each refused address class, the ALPN decision between a validation and a normal 
 validation connection being answered with the challenge certificate (checked for the critical
 `id-pe-acmeIdentifier` extension and its digest) while leaving no log line and no failure
 count, the certificate resolver returning a certificate and switching to a new one, the
-renewal time, the cache and its permissions, and the backoff.
+renewal time, the cache and its permissions, and the backoff. Against an in-process fake CA
+(`crates/server/src/acme/order/fake_ca.rs`): the whole exchange for two names, a rejected
+validation, a CA that does not finish validating, `badNonce`, and a saved account the CA no
+longer knows.
 
 Not exercised: the exchange with a real CA, that is, the account, order, validation and
 finalisation calls that the `instant-acme` library makes. Nothing here proves that Let's
