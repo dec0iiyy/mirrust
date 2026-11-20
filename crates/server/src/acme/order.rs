@@ -30,6 +30,12 @@ const FIRST_RETRY: Duration = Duration::from_secs(5 * 60);
 /// The longest wait between attempts.
 const LONGEST_RETRY: Duration = Duration::from_secs(6 * 3600);
 
+/// The least time between a success and the next order, whatever the certificate's dates say.
+/// A host clock far ahead of the CA's makes a fresh certificate look due at once; without
+/// this, the server would order again and again and use up Let's Encrypt's limit of five
+/// certificates per week for the same names.
+const MIN_RENEWAL_GAP: Duration = Duration::from_secs(3600);
+
 /// The longest single sleep. A long wait is cut into pieces and the wall clock is read after
 /// each, because timers do not run while the machine is suspended.
 const SLEEP_STEP: Duration = Duration::from_secs(12 * 3600);
@@ -190,7 +196,7 @@ impl Client {
                     if let Err(error) = self.cache.clear_failures() {
                         eprintln!("acme: cannot remove the record of failed attempts: {error}");
                     }
-                    renew_at = validity.renew_at();
+                    renew_at = validity.renew_at().max(now + MIN_RENEWAL_GAP);
                 }
                 Err(error) => {
                     let wait = retry.next_wait();

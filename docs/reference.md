@@ -205,7 +205,8 @@ warning.
   attempt. After a failure it waits 5 minutes, then twice as long each time up to 6 hours; the
   count and time of the failures are kept in `last-failure.txt` in the cache, so a restart does
   not start the waits over. A certificate is renewed 30 days before it ends, or a third of its lifetime before it ends if
-  that is shorter.
+  that is shorter, but never sooner than an hour after the last order, so a host clock that is far off
+  cannot make it order in a loop.
 - A connection whose ClientHello offers ALPN `acme-tls/1` is the CA validating a name. It gets
   the challenge certificate, takes a connection slot like any connection, and is not written to
   the request log and not counted in the failure summary.

@@ -182,6 +182,11 @@ impl FakeCa {
         self.state().validation = validation;
     }
 
+    /// Issues certificates that are valid from January 1st of `from` until `until`.
+    pub(super) fn set_certificate_years(&self, from: i32, until: i32) {
+        self.state().years = (from, until);
+    }
+
     /// The next `count` requests are answered `badNonce`.
     pub(super) fn send_bad_nonces(&self, count: u32) {
         self.state().bad_nonces_to_send = count;
@@ -957,6 +962,29 @@ async fn a_rejected_validation_fails_the_attempt_with_the_cas_words_and_clears_t
     assert!(!harness.client.certs.is_set());
     assert!(harness.client.challenges.is_empty());
     assert!(!harness.ca.log().contains(&"finalize"));
+}
+
+#[tokio::test]
+async fn a_certificate_that_is_already_due_for_renewal_is_not_ordered_again_in_a_loop() {
+    // A host clock that is far ahead of the CA's (or a CA that issues short certificates)
+    // makes the new certificate look due at once; each success resets the backoff.
+    let harness = Harness::new("loop", &["a.mirror.test"]).await;
+    harness.ca.set_certificate_years(2020, 2021);
+    let ca = harness.ca.clone();
+    let run = harness.client.run(
+        SystemTime::now(),
+        true,
+        Backoff::new(FIRST_RETRY, LONGEST_RETRY),
+    );
+    tokio::time::timeout(Duration::from_millis(2500), run)
+        .await
+        .expect_err("the task never ends");
+    let orders = ca
+        .log()
+        .iter()
+        .filter(|&&entry| entry == "new-order")
+        .count();
+    assert_eq!(orders, 1, "one order, then a wait: {:?}", ca.log());
 }
 
 #[tokio::test]
