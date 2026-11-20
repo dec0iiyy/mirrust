@@ -291,8 +291,9 @@ Each frame is recorded with `frame_type` (`DATA`, `HEADERS`, `PRIORITY`, `RST_ST
 - `HEADERS`: `headers` as `name: value` lines, decoded with a fresh HPACK decoder for each HEADERS
   frame; `priority` when the priority flag is set. `CONTINUATION` frames are recorded but not
   decoded, so a header block split mid-field fails to decode and the request gets no answer.
-- `SETTINGS`: `settings` as `NAME = value` lines in wire order. Setting 9 is
-  `NO_RFC7540_PRIORITIES`; unknown ids are `UNKNOWN_SETTING_n`.
+- `SETTINGS`: `settings` as `NAME = value` lines in wire order. Setting 8 is
+  `ENABLE_CONNECT_PROTOCOL` (RFC 8441) and setting 9 is `NO_RFC7540_PRIORITIES` (RFC 9218);
+  unknown ids are `UNKNOWN_SETTING_n`.
 - `WINDOW_UPDATE`: `increment`.
 - `PRIORITY`: `priority` `{weight, depends_on, exclusive}`, weight as wire value + 1 (1–256).
 - `DATA`: `payload` (base64, padding removed).
