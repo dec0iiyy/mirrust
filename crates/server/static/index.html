@@ -354,7 +354,7 @@ function signals(report) {
 
   const ech = (tls.extensions || []).find((e) => /\(65037\)$/.test(e.name || ""));
   out.push(ech
-    ? signal("good", "Encrypted ClientHello", "Sent", "Hides the real server name from the network; Chrome sends a GREASE one when the site has no ECH key")
+    ? signal(null, "Encrypted ClientHello", "Sent", "Chrome and Firefox send this extension as GREASE when the site publishes no ECH key, as is the case for this server, so it hides nothing here; with a real key it hides the server name")
     : signal(null, "Encrypted ClientHello", "Not sent", "The server name, if any, travels in clear"));
 
   const sni = extension(tls, "server_name");
@@ -376,7 +376,7 @@ function signals(report) {
 
   const grease = ciphers.some(isGrease);
   out.push(signal(null, "GREASE", grease ? "Yes" : "No",
-    grease ? "Random reserved values, typical of Chrome and other BoringSSL clients" : "No reserved values, typical of OpenSSL, Go, rustls and Firefox"));
+    grease ? "Random reserved values, typical of Chrome and other BoringSSL clients, and of Safari" : "No reserved values, typical of OpenSSL, Go, rustls and Firefox"));
 
   return out;
 }

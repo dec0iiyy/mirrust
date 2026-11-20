@@ -555,7 +555,7 @@ fn signals(tls: &TlsDetails) -> Vec<Signal> {
     out.push(Signal {
         label: "Encrypted ClientHello",
         value: if ech { "Sent" } else { "Not sent" }.to_owned(),
-        tone: ech.then_some(Style::Green),
+        tone: None,
     });
 
     let broken = real_ciphers
@@ -811,6 +811,17 @@ mod tests {
         let stripped = without_codes(&coloured);
         assert!(!stripped.contains('\x1b'), "{stripped:?}");
         assert_eq!(stripped, plain, "colour changes no character of the layout");
+    }
+
+    #[test]
+    fn an_ech_extension_is_not_praised_as_green() {
+        // Chrome and Firefox send a GREASE ECH to a site with no ECH key, which hides nothing.
+        let coloured = render_with(&report(), Some(&mixed()), &client(), Colour::Ansi);
+        let line = coloured
+            .lines()
+            .find(|line| line.contains("Encrypted ClientHello"))
+            .expect("the TLS block has the line");
+        assert!(!line.contains(GREEN), "{line:?}");
     }
 
     #[test]
