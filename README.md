@@ -166,7 +166,7 @@ the internet, with the Let's Encrypt staging CA and then production (see
 
 ## Status
 
-Version 0.1.3. 349 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
+Version 0.1.4. 349 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
 in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container image is built
 and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
 unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with

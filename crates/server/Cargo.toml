@@ -1,7 +1,7 @@
 [package]
 name = "server"
 description = "mirrust: a TLS server that echoes the client's fingerprints, as tls.peet.ws does"
-version = "0.1.3"
+version = "0.1.4"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

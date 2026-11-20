@@ -90,7 +90,7 @@ mirrust's output. See [Compatibility with tls.peet.ws](#compatibility-with-tlspe
 
 ## Status
 
-This is version 0.1.3.
+This is version 0.1.4.
 
 Measured today: the TLS ClientHello over TCP and QUIC, the HTTP/1 request headers, the HTTP/2
 frames and Akamai fingerprint, the first flight of a QUIC connection, and the HTTP/3 SETTINGS
