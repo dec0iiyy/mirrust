@@ -9,7 +9,6 @@ use std::sync::{Arc, RwLock};
 use anyhow::Context as _;
 use fingerprint::ClientHello as ParsedHello;
 use rcgen::{CertificateParams, CustomExtension, KeyPair};
-use rustls::ServerConfig;
 use rustls::crypto::aws_lc_rs::sign::any_supported_type;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
@@ -45,7 +44,7 @@ impl AcmeChallenges {
     #[must_use]
     pub fn new() -> Self {
         let pending = Arc::new(Pending::default());
-        let mut config = ServerConfig::builder()
+        let mut config = crate::server_config_builder()
             .with_no_client_auth()
             .with_cert_resolver(Arc::clone(&pending) as Arc<dyn ResolvesServerCert>);
         config.alpn_protocols = vec![ACME_TLS_ALPN.to_vec()];

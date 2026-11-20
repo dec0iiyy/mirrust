@@ -110,7 +110,7 @@ pub fn tls_config(
     certs: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
 ) -> Result<ServerConfig, rustls::Error> {
-    let config = ServerConfig::builder()
+    let config = server_config_builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
     Ok(with_http_alpn(config))
@@ -121,10 +121,24 @@ pub fn tls_config(
 /// without a restart. [`serve_h3`] takes this configuration too and uses the same resolver.
 #[must_use]
 pub fn tls_config_with_resolver(resolver: Arc<dyn ResolvesServerCert>) -> ServerConfig {
-    let config = ServerConfig::builder()
+    let config = server_config_builder()
         .with_no_client_auth()
         .with_cert_resolver(resolver);
     with_http_alpn(config)
+}
+
+/// A rustls server configuration builder on the aws-lc-rs provider, with the TLS versions
+/// rustls enables by default (1.2 and 1.3).
+///
+/// `ServerConfig::builder()` takes the process's default provider, and when none is
+/// installed it works only while exactly one of rustls's provider features is compiled in:
+/// with a second one, which any dependency can turn on, it panics at first use. Naming the
+/// provider keeps this crate's configurations out of that.
+pub(crate) fn server_config_builder() -> rustls::ConfigBuilder<ServerConfig, rustls::WantsVerifier>
+{
+    ServerConfig::builder_with_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        .with_safe_default_protocol_versions()
+        .expect("the aws-lc-rs provider has cipher suites for TLS 1.2 and 1.3")
 }
 
 fn with_http_alpn(mut config: ServerConfig) -> ServerConfig {

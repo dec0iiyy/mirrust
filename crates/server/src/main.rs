@@ -302,8 +302,21 @@ fn bind_error(protocol: &str, addr: SocketAddr, error: std::io::Error) -> anyhow
     anyhow::Error::new(error).context(format!("cannot listen on {protocol} {addr}{hint}"))
 }
 
+/// Makes aws-lc-rs the process's rustls provider.
+///
+/// This crate's own TLS configurations name the provider, but the libraries around it ask
+/// for the process default: the ACME client's HTTPS connection (`hyper-rustls`) does. With no
+/// default installed rustls picks the one provider compiled in, and panics at first use if a
+/// dependency ever turns on a second one, which for the ACME client would be at the first
+/// order, long after start.
+fn install_crypto_provider() {
+    // An error means a provider is already installed, which is all this is for.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    install_crypto_provider();
     let mut args = match parse_args(std::env::args().skip(1))? {
         Command::Help => {
             println!("{USAGE}");
@@ -593,5 +606,18 @@ mod tests {
         let other = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
         let text = format!("{:#}", bind_error("udp", addr, other));
         assert!(!text.contains("already in use"), "{text}");
+    }
+
+    #[test]
+    fn the_crypto_provider_is_installed_and_installing_again_is_harmless() {
+        install_crypto_provider();
+        install_crypto_provider();
+        let provider = rustls::crypto::CryptoProvider::get_default().expect("installed");
+        let ours = rustls::crypto::aws_lc_rs::default_provider();
+        assert_eq!(
+            format!("{:?}", provider.cipher_suites),
+            format!("{:?}", ours.cipher_suites),
+            "the aws-lc-rs provider"
+        );
     }
 }

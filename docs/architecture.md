@@ -254,6 +254,13 @@ directly.
   rustls, aws-lc-rs and `rcgen` the workspace already has, and leaves the connection handling
   alone. The TLS-ALPN-01 certificate is built with `rcgen`
   (`CustomExtension::new_acme_identifier` with the SHA-256 of the key authorization, critical).
+- **The rustls provider is named.** Every TLS configuration this crate builds
+  (`tls_config`, `tls_config_with_resolver`, the TLS-ALPN-01 acceptor) is built with
+  `builder_with_provider` on aws-lc-rs, and `main` installs aws-lc-rs as the process default
+  before anything else, for the libraries that ask for the default (the ACME client's HTTPS
+  connection). `ServerConfig::builder()` without an installed default works only while one
+  provider feature of rustls is compiled in, and panics at first use once a dependency turns
+  on a second.
 - **Capture before the TLS library.** Reading the ClientHello from the socket and replaying it
   keeps the exact bytes the client sent, independent of what rustls parses or exposes, and the
   same code works for any rustls version.
