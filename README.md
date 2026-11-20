@@ -161,6 +161,7 @@ the internet, with the Let's Encrypt staging CA and then production (see
 
 - [Reference](docs/reference.md): flags, API, JSON fields, the request log.
 - [Fingerprints](docs/fingerprints.md): how every value is computed, and the `audit` checks.
+- [Common clients](docs/clients.md): how curl, Python, Node, Go, `reqwest` and Chrome score, and what a faked `User-Agent` costs.
 - [Architecture](docs/architecture.md): how a connection is read, limits and known gaps.
 - [Contributing](CONTRIBUTING.md) and [Security](SECURITY.md).
 
