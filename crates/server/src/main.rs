@@ -6,41 +6,94 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
+use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use server::{Config, ConnectionLimit, RequestLog, self_signed_cert, serve, serve_h3, tls_config};
+use server::acme::domain::{self, AUTO, MAX_DOMAINS};
+use server::acme::{
+    AcmeChallenges, CertCache, CertificateAuthority, CurrentCert, Settings as AcmeSettings,
+};
+use server::{
+    Config, ConnectionLimit, RequestLog, self_signed_cert, serve, serve_h3, tls_config,
+    tls_config_with_resolver,
+};
 use tokio::net::TcpListener;
 
-const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM] [--cors-key KEY]
-                  [--log PATH] [--max-connections N]
+const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
+                  [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
+                  [--cors-key KEY] [--log PATH] [--max-connections N]
 
   --listen           address to listen on, TCP and UDP for HTTP/3 (default 127.0.0.1:8443)
-  --cert/--key       PEM certificate chain and private key; without them a self-signed
-                     certificate for localhost is generated
+  --cert/--key       PEM certificate chain and private key; without them, and without
+                     --domain, a self-signed certificate for localhost is generated
+  --domain           get a Let's Encrypt certificate for this host name and renew it, with
+                     no other setup (TLS-ALPN-01 on TCP port 443; the name must resolve to
+                     this server). Repeat for up to 4 names. 'auto' uses A-B-C-D.sslip.io
+                     for this machine's public IPv4 address (sslip.io is a free third-party
+                     DNS service). Using it accepts the Let's Encrypt Subscriber Agreement
+                     (https://letsencrypt.org/repository/). Conflicts with --cert/--key
+  --acme-dir         where the ACME account key and the certificates are kept
+                     (default ./mirrust-acme, created with mode 0700)
+  --acme-email       contact address for Let's Encrypt, used when the account is created
+  --acme-staging     use the Let's Encrypt staging CA (certificates browsers do not trust,
+                     no rate limits that matter): for trying --domain out
   --cors-key         header prefix that turns on CORS headers (default X-CORS, empty: off)
   --log              append one JSON line per request and per failed TLS handshake to
                      this file (default: no log)
   --max-connections  connections open at once, TCP and QUIC together; more are refused
                      (default 1024)";
 
+/// The default for `--acme-dir`.
+const DEFAULT_ACME_DIR: &str = "./mirrust-acme";
+
+/// The port Let's Encrypt validates on, whatever the server listens on.
+const VALIDATION_PORT: u16 = 443;
+
+/// What `--domain` and the `--acme-*` flags asked for, before the names are resolved.
+#[derive(Debug, PartialEq, Eq)]
+struct AcmeArgs {
+    /// The `--domain` values as given, `auto` still unresolved.
+    domains: Vec<String>,
+    dir: PathBuf,
+    email: Option<String>,
+    staging: bool,
+}
+
+#[derive(Debug)]
 struct Args {
     listen: SocketAddr,
     cert: Option<(PathBuf, PathBuf)>,
+    acme: Option<AcmeArgs>,
     log: Option<PathBuf>,
     config: Config,
 }
 
-fn parse_args() -> anyhow::Result<Args> {
+/// What the command line asks the program to do.
+#[derive(Debug)]
+enum Command {
+    Run(Box<Args>),
+    Help,
+}
+
+fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> {
     let mut listen: SocketAddr = "127.0.0.1:8443".parse().expect("valid default address");
     let mut cert = None;
     let mut key = None;
     let mut log = None;
+    let mut domains: Vec<String> = Vec::new();
+    let mut acme_dir = None;
+    let mut acme_email = None;
+    let mut acme_staging = false;
     let mut config = Config::default();
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(flag) = args.next() {
-        if flag == "-h" || flag == "--help" {
-            println!("{USAGE}");
-            std::process::exit(0);
+        match flag.as_str() {
+            "-h" | "--help" => return Ok(Command::Help),
+            "--acme-staging" => {
+                acme_staging = true;
+                continue;
+            }
+            _ => {}
         }
         let value = args
             .next()
@@ -53,6 +106,9 @@ fn parse_args() -> anyhow::Result<Args> {
             }
             "--cert" => cert = Some(PathBuf::from(value)),
             "--key" => key = Some(PathBuf::from(value)),
+            "--domain" => domains.push(value),
+            "--acme-dir" => acme_dir = Some(PathBuf::from(value)),
+            "--acme-email" => acme_email = Some(check_email(value)?),
             "--cors-key" => config.cors_key = value,
             "--log" => log = Some(PathBuf::from(value)),
             "--max-connections" => {
@@ -71,12 +127,49 @@ fn parse_args() -> anyhow::Result<Args> {
         (None, None) => None,
         _ => bail!("--cert and --key go together"),
     };
-    Ok(Args {
+    let acme = if domains.is_empty() {
+        if acme_dir.is_some() || acme_email.is_some() || acme_staging {
+            bail!("--acme-dir, --acme-email and --acme-staging only mean something with --domain");
+        }
+        None
+    } else {
+        if cert.is_some() {
+            bail!("--domain gets its own certificate and conflicts with --cert/--key; use one");
+        }
+        if domains.len() > MAX_DOMAINS {
+            bail!(
+                "at most {MAX_DOMAINS} --domain names, got {}",
+                domains.len()
+            );
+        }
+        Some(AcmeArgs {
+            domains,
+            dir: acme_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_ACME_DIR)),
+            email: acme_email,
+            staging: acme_staging,
+        })
+    };
+    Ok(Command::Run(Box::new(Args {
         listen,
         cert,
+        acme,
         log,
         config,
-    })
+    })))
+}
+
+/// Accepts an address of the form `local@host`, with no spaces and nothing that would break
+/// the `mailto:` URI the CA is given.
+fn check_email(value: String) -> anyhow::Result<String> {
+    let valid = value.split_once('@').is_some_and(|(local, host)| {
+        !local.is_empty() && host.contains('.') && !host.contains('@')
+    }) && !value
+        .contains(|c: char| c.is_whitespace() || c.is_control() || "?,<>&".contains(c));
+    if valid {
+        Ok(value)
+    } else {
+        bail!("bad --acme-email {value}: expected an address like admin@example.com")
+    }
 }
 
 /// Starts listening for the signals that stop the server: Ctrl-C (SIGINT) and SIGTERM, which
@@ -105,10 +198,9 @@ fn shutdown_signal() -> io::Result<impl Future<Output = io::Result<()>>> {
     Ok(tokio::signal::ctrl_c())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut args = parse_args()?;
-    let (certs, key) = match &args.cert {
+/// The TLS configuration for a fixed certificate: the PEM files given, or a self-signed one.
+fn static_tls(files: Option<&(PathBuf, PathBuf)>) -> anyhow::Result<ServerConfig> {
+    let (certs, key) = match files {
         Some((cert, key)) => (
             CertificateDer::pem_file_iter(cert)
                 .and_then(Iterator::collect)
@@ -118,7 +210,59 @@ async fn main() -> anyhow::Result<()> {
         ),
         None => self_signed_cert().context("generating a self-signed certificate")?,
     };
-    let tls = Arc::new(tls_config(certs, key).context("building the TLS configuration")?);
+    tls_config(certs, key).context("building the TLS configuration")
+}
+
+/// The ACME pieces `--domain` sets up, before anything is printed or listened on.
+struct Acme {
+    settings: AcmeSettings,
+    cache: CertCache,
+    certs: Arc<CurrentCert>,
+    challenges: AcmeChallenges,
+}
+
+/// Resolves the names (`auto` included) and opens the cache directory, so that a bad name or an
+/// unwritable directory stops the start instead of failing later in the background.
+fn prepare_acme(args: AcmeArgs) -> anyhow::Result<Acme> {
+    let names = domain::resolve(&args.domains, domain::default_route_ipv4)?;
+    if args.domains == [AUTO] {
+        eprintln!("acme: --domain auto: using {}", names[0]);
+    }
+    let authority = if args.staging {
+        CertificateAuthority::LetsEncryptStaging
+    } else {
+        CertificateAuthority::LetsEncrypt
+    };
+    let cache = CertCache::open(&args.dir, authority)?;
+    Ok(Acme {
+        settings: AcmeSettings {
+            names,
+            email: args.email,
+            authority,
+        },
+        cache,
+        certs: Arc::new(CurrentCert::new()),
+        challenges: AcmeChallenges::new(),
+    })
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let mut args = match parse_args(std::env::args().skip(1))? {
+        Command::Help => {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        Command::Run(args) => *args,
+    };
+    let acme = args.acme.take().map(prepare_acme).transpose()?;
+    let tls = if let Some(acme) = &acme {
+        args.config.challenges = Some(acme.challenges.clone());
+        tls_config_with_resolver(Arc::clone(&acme.certs) as _)
+    } else {
+        static_tls(args.cert.as_ref())?
+    };
+    let tls = Arc::new(tls);
     let listener = TcpListener::bind(args.listen)
         .await
         .with_context(|| format!("listening on {}", args.listen))?;
@@ -139,6 +283,21 @@ async fn main() -> anyhow::Result<()> {
     config.h3_port = Some(addr.port());
     let config = Arc::new(config);
     let shutdown = shutdown_signal().context("installing the signal handlers")?;
+    let renewals = acme.map(|acme| {
+        if addr.port() != VALIDATION_PORT {
+            eprintln!(
+                "warning: listening on port {}, but Let's Encrypt validates on TCP port {VALIDATION_PORT} \
+                 only; issuance will fail unless port {VALIDATION_PORT} reaches this server",
+                addr.port()
+            );
+        }
+        tokio::spawn(server::acme::start(
+            acme.settings,
+            acme.cache,
+            acme.certs,
+            acme.challenges,
+        ))
+    });
     println!("listening on https://{addr} (TCP and HTTP/3 over UDP)");
 
     let served = tokio::select! {
@@ -149,6 +308,17 @@ async fn main() -> anyhow::Result<()> {
             )
             .map(|_| ())
         } => served,
+        // The task keeps the certificate current and never ends; if it does, the certificate
+        // would silently expire, so the server stops instead.
+        stopped = async {
+            match renewals {
+                Some(task) => {
+                    let ended = task.await;
+                    Err(io::Error::other(format!("the certificate task stopped: {ended:?}")))
+                }
+                None => std::future::pending().await,
+            }
+        } => stopped,
         // Dropping the other branch stops accepting; connections still in progress end when
         // the process exits.
         signal = shutdown => signal,
@@ -161,4 +331,148 @@ async fn main() -> anyhow::Result<()> {
     }
     served?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> anyhow::Result<Args> {
+        match parse_args(args.iter().map(|&arg| arg.to_owned()))? {
+            Command::Run(args) => Ok(*args),
+            Command::Help => bail!("help"),
+        }
+    }
+
+    fn error(args: &[&str]) -> String {
+        format!("{:#}", parse(args).expect_err("should be refused"))
+    }
+
+    #[test]
+    fn without_domain_nothing_changes() {
+        let args = parse(&[
+            "--listen",
+            "0.0.0.0:443",
+            "--cert",
+            "c.pem",
+            "--key",
+            "k.pem",
+        ])
+        .expect("valid");
+        assert!(args.acme.is_none());
+        assert_eq!(
+            args.cert,
+            Some((PathBuf::from("c.pem"), PathBuf::from("k.pem")))
+        );
+        assert!(parse(&[]).expect("no flags").acme.is_none());
+        assert!(matches!(
+            parse_args(["--help".to_owned()]).expect("help"),
+            Command::Help
+        ));
+    }
+
+    #[test]
+    fn domain_has_documented_defaults() {
+        let acme = parse(&["--domain", "mirror.example.com"])
+            .expect("valid")
+            .acme
+            .expect("acme");
+        assert_eq!(
+            acme,
+            AcmeArgs {
+                domains: vec!["mirror.example.com".to_owned()],
+                dir: PathBuf::from("./mirrust-acme"),
+                email: None,
+                staging: false,
+            }
+        );
+    }
+
+    #[test]
+    fn all_acme_flags_are_read_and_domain_repeats() {
+        let acme = parse(&[
+            "--domain",
+            "a.example.com",
+            "--acme-staging",
+            "--domain",
+            "b.example.com",
+            "--acme-dir",
+            "/var/lib/mirrust",
+            "--acme-email",
+            "admin@example.com",
+        ])
+        .expect("valid")
+        .acme
+        .expect("acme");
+        assert_eq!(acme.domains, ["a.example.com", "b.example.com"]);
+        assert_eq!(acme.dir, PathBuf::from("/var/lib/mirrust"));
+        assert_eq!(acme.email.as_deref(), Some("admin@example.com"));
+        assert!(acme.staging);
+    }
+
+    #[test]
+    fn domain_conflicts_with_cert_and_key() {
+        for args in [
+            [
+                "--domain",
+                "a.example.com",
+                "--cert",
+                "c.pem",
+                "--key",
+                "k.pem",
+            ],
+            [
+                "--cert",
+                "c.pem",
+                "--key",
+                "k.pem",
+                "--domain",
+                "a.example.com",
+            ],
+        ] {
+            let message = error(&args);
+            assert!(message.contains("conflicts with --cert/--key"), "{message}");
+        }
+    }
+
+    #[test]
+    fn acme_flags_need_domain() {
+        for args in [
+            &["--acme-staging"][..],
+            &["--acme-dir", "d"],
+            &["--acme-email", "a@example.com"],
+        ] {
+            let message = error(args);
+            assert!(
+                message.contains("only mean something with --domain"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn too_many_domains_and_bad_emails_are_refused() {
+        let many = [
+            "--domain", "a.com", "--domain", "b.com", "--domain", "c.com", "--domain", "d.com",
+            "--domain", "e.com",
+        ];
+        assert!(error(&many).contains("at most 4"));
+        for bad in [
+            "nobody",
+            "@example.com",
+            "a@b",
+            "a b@example.com",
+            "a@example.com?x=1",
+        ] {
+            let message = error(&["--domain", "a.example.com", "--acme-email", bad]);
+            assert!(message.contains("bad --acme-email"), "{bad}: {message}");
+        }
+    }
+
+    #[test]
+    fn a_flag_without_a_value_is_an_error() {
+        assert!(error(&["--domain"]).contains("--domain needs a value"));
+        assert!(error(&["--acme-dir"]).contains("--acme-dir needs a value"));
+        assert!(error(&["--bogus", "x"]).contains("unknown flag"));
+    }
 }
