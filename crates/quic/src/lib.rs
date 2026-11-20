@@ -29,4 +29,4 @@ mod reader;
 
 pub use assembler::{ClientInitial, InitialAssembler, MAX_CRYPTO_LEN, MAX_DATAGRAM_SIZES};
 pub use error::Error;
-pub use packet::Version;
+pub use packet::{Version, destination_connection_id};

@@ -2,7 +2,7 @@
 //!
 //! quinn and rustls never show the ClientHello, so [`SniffingSocket`] wraps the socket quinn
 //! reads from: each long-header datagram is also fed to a [`quic::InitialAssembler`] for its
-//! peer, and the finished ClientHello waits in [`ClientHellos`] under (peer address, original
+//! connection (peer and Destination Connection ID), and the finished ClientHello waits in [`ClientHellos`] under (peer address, original
 //! Destination Connection ID) until the connection handler takes it. Datagrams reach quinn
 //! unchanged.
 
@@ -35,8 +35,9 @@ pub(crate) struct ClientHellos {
 
 #[derive(Debug, Default)]
 struct Tables {
-    /// Per peer, the Initial packets seen so far.
-    pending: Table<SocketAddr, InitialAssembler>,
+    /// Per peer and Destination Connection ID, the Initial packets seen so far. A peer's
+    /// connections can share one UDP socket, so the peer alone does not name a connection.
+    pending: Table<(SocketAddr, Vec<u8>), InitialAssembler>,
     /// Finished Initial flights, ClientHello included, by peer and original DCID.
     complete: Table<(SocketAddr, Vec<u8>), ClientInitial>,
 }
@@ -48,25 +49,17 @@ impl ClientHellos {
     }
 
     fn observe_at(&self, from: SocketAddr, datagram: &[u8], now: Instant) {
-        // Only a long header (first bit set) can start an Initial packet.
-        if datagram.first().is_none_or(|first| first & 0x80 == 0) {
+        // Only a long header can start an Initial packet.
+        let Some(dcid) = quic::destination_connection_id(datagram) else {
             return;
-        }
+        };
+        let key = (from, dcid.to_vec());
         let mut tables = self.tables.lock().expect("ClientHello table lock poisoned");
         let Tables { pending, complete } = &mut *tables;
-        let finished = if let Some(assembler) = pending.get_mut(&from) {
-            let result = match assembler.push(datagram) {
-                // A new connection from the same address, or the client already switched to
-                // the server's connection ID: start over.
-                Err(quic::Error::ConnectionChanged) => {
-                    *assembler = InitialAssembler::new();
-                    assembler.push(datagram)
-                }
-                other => other,
-            };
-            let finished = result.ok().flatten();
+        let finished = if let Some(assembler) = pending.get_mut(&key) {
+            let finished = assembler.push(datagram).ok().flatten();
             if finished.is_some() {
-                pending.remove(&from);
+                pending.remove(&key);
             }
             finished
         } else {
@@ -75,7 +68,7 @@ impl ClientHellos {
             let mut assembler = InitialAssembler::new();
             match assembler.push(datagram) {
                 Ok(None) => {
-                    pending.insert(from, assembler, now);
+                    pending.insert(key, assembler, now);
                     None
                 }
                 Ok(finished) => finished,
@@ -333,6 +326,31 @@ mod tests {
             .expect("the real client is tracked");
         assert_eq!(found.client_hello(), message);
         assert_eq!(lens(&hellos), (MAX_ENTRIES - 1, 0));
+    }
+
+    #[test]
+    fn connections_from_one_address_are_assembled_separately() {
+        // One UDP socket can carry several connections; their Initial datagrams interleave.
+        let hellos = ClientHellos::default();
+        let now = Instant::now();
+        let client = peer(1);
+        let (dcid_a, dcid_b) = ([1; 8], [2; 8]);
+        let (mut hello_a, mut hello_b) = (hello(), hello());
+        hello_a[5] = 0xaa;
+        hello_b[5] = 0xbb;
+        let datagrams = [
+            initial(&dcid_a, &crypto_frame(0, &hello_a[..10])),
+            initial(&dcid_b, &crypto_frame(0, &hello_b[..10])),
+            initial(&dcid_a, &crypto_frame(10, &hello_a[10..])),
+            initial(&dcid_b, &crypto_frame(10, &hello_b[10..])),
+        ];
+        for datagram in &datagrams {
+            hellos.observe_at(client, datagram, now);
+        }
+        let found_a = hellos.take(client, &dcid_a).expect("connection A is read");
+        let found_b = hellos.take(client, &dcid_b).expect("connection B is read");
+        assert_eq!(found_a.client_hello(), hello_a);
+        assert_eq!(found_b.client_hello(), hello_b);
     }
 
     #[test]

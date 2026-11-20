@@ -115,7 +115,7 @@ headers as the HTTP/1.1 answer; `crates/http2` calls the router's callback for e
 ```
 UDP socket ──► SniffingSocket.poll_recv ──► quinn endpoint ──► h3 ──► route
                      │                                      ▲
-                     └─► per-peer quic::InitialAssembler ───┘ ClientHello by (peer, original DCID)
+                     └─► per-connection quic::InitialAssembler ┘ ClientHello by (peer, original DCID)
 ```
 
 HTTP/3 runs on `quinn` (with the aws-lc-rs provider), `h3` and `h3-quinn`, on the same address
@@ -128,13 +128,14 @@ is held until the connection's task ends, at most 15 seconds later.
 
 Neither quinn nor rustls exposes the ClientHello, so the server wraps the UDP socket quinn reads
 from (`SniffingSocket`, an `AsyncUdpSocket`). Each received datagram is passed on to quinn
-unchanged; datagrams with a long header are also fed to a per-peer `quic::InitialAssembler`
-(GRO batches are split by their stride first). Nothing is done on the send side. A completed
+unchanged; datagrams with a long header are also fed to a `quic::InitialAssembler` of their
+connection, found by (peer address, Destination Connection ID) (GRO batches are split by their stride first). Nothing is done on the send side. A completed
 ClientHello is stored under (peer address, original Destination Connection ID). The connection
 task reads both from `quinn::Incoming`, waits for the handshake to finish (by then every Initial
 packet has passed through the socket), and takes the entry.
 
-A new Initial with a different DCID from the same address restarts that peer's assembler. The
+Connections that share one client address, such as several connections of one UDP socket, have
+separate assemblers because their Destination Connection IDs differ. The
 in-progress and finished tables are each capped at 4096 entries. Initial keys are public, so
 anyone can fill a table with valid Initial packets from spoofed addresses; therefore a newcomer
 always gets a slot: entries older than 5 seconds are dropped first, and if the table is still
