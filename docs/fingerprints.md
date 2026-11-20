@@ -246,12 +246,22 @@ The extension data is a sequence of `id` (varint), `length` (varint), `length` b
 | `0x0f` | `initial_source_connection_id` | hex |
 | `0x10` | `retry_source_connection_id` | hex |
 | `0x11` | `version_information` (RFC 9368) | hex: the chosen version, then the available versions, four bytes each |
+| `0x1d` | `reset_stream_at` (draft-ietf-quic-reliable-stream-reset) | flag |
 | `0x20` | `max_datagram_frame_size` (RFC 9221) | integer |
+| `0x3e` | `initial_max_path_id` (RFC 10069) | integer |
+| `0x173e` | `discard` (IANA, provisional) | hex |
+| `0x219e` | `scone_supported` (IANA, provisional) | hex |
+| `0x26ab` | `google_handshake_message` (Google QUIC) | hex |
 | `0x2ab2` | `grease_quic_bit` (RFC 9287) | flag |
 | `0x3127` | `initial_rtt` (Google QUIC) | integer, microseconds |
 | `0x3128` | `google_connection_options` (Google QUIC) | hex: four-character tags |
+| `0x3129` | `user_agent` (Google QUIC, deprecated) | hex |
 | `0x4752` | `google_version` (Google QUIC) | hex |
-| `0xde1a`, `0xff02de1a`, `0xff04de1b` | `min_ack_delay` (draft-ietf-quic-ack-frequency) | integer, microseconds |
+| `0xff73db` | `version_information_draft` (draft-ietf-quic-version-negotiation) | hex |
+| `0xde1a`, `0xff02de1a`, `0xff03de1a`, `0xff04de1a`, `0xff04de1b` | `min_ack_delay` (draft-iyengar-quic-delayed-ack, draft-ietf-quic-ack-frequency; the id changed with the drafts and IANA registers `0xff04de1b`) | integer, microseconds |
+
+Names come from RFC 9000 section 18.2 and the IANA "QUIC Transport Parameters" registry; an id
+that is in neither (the multipath drafts' `enable_multipath`, for one) is `UNKNOWN_<id>`.
 
 Rules:
 

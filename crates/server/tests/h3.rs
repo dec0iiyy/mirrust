@@ -394,3 +394,36 @@ async fn h3_json_api_ignores_accept() {
     let json: Value = serde_json::from_slice(&body).expect("JSON body");
     assert!(json["ja4"].as_str().is_some_and(|ja4| ja4.starts_with('q')));
 }
+
+#[tokio::test]
+async fn h3_does_not_accept_quic_datagrams() {
+    // DATAGRAM frames are not flow controlled; quinn buffers up to 1.25 MB of them per
+    // connection when it advertises `max_datagram_frame_size`, and nothing here reads them.
+    let (addr, roots) = start().await;
+    let (_endpoint, connection) = connect(addr, roots).await;
+    assert_eq!(connection.max_datagram_size(), None);
+}
+
+#[tokio::test]
+async fn h3_answers_head_without_a_body() {
+    // RFC 9110 section 9.3.2: the server MUST NOT send content in the response to HEAD.
+    let (addr, roots) = start().await;
+    let (_endpoint, connection) = connect(addr, roots).await;
+    let (mut driver, mut sender) = h3::client::new(h3_quinn::Connection::new(connection))
+        .await
+        .expect("HTTP/3 setup");
+    tokio::spawn(async move { future::poll_fn(|cx| driver.poll_close(cx)).await });
+
+    let request = http::Request::head(format!("https://localhost:{}/api/all", addr.port()))
+        .body(())
+        .expect("request");
+    let mut stream = sender.send_request(request).await.expect("send request");
+    stream.finish().await.expect("finish request");
+    let response = stream.recv_response().await.expect("response head");
+    assert_eq!(response.status(), 200);
+    assert_ne!(response.headers()["content-length"], "0");
+    assert!(
+        stream.recv_data().await.expect("response end").is_none(),
+        "HEAD answered with content"
+    );
+}

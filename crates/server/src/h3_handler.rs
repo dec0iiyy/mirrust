@@ -118,6 +118,9 @@ fn transport_config() -> io::Result<TransportConfig> {
         .max_concurrent_uni_streams(VarInt::from_u32(MAX_UNI_STREAMS))
         .stream_receive_window(VarInt::from_u32(STREAM_RECEIVE_WINDOW))
         .receive_window(VarInt::from_u32(CONNECTION_RECEIVE_WINDOW))
+        // Nothing here reads QUIC datagrams (RFC 9221). quinn would otherwise advertise them and
+        // buffer 1.25 MB of them per connection, which flow control does not limit.
+        .datagram_receive_buffer_size(None)
         .max_idle_timeout(Some(idle_timeout));
     Ok(transport)
 }
@@ -261,10 +264,14 @@ async fn respond(
         .send_response(response)
         .await
         .context("sending the response head")?;
-    stream
-        .send_data(Bytes::from(body))
-        .await
-        .context("sending the body")?;
+    // The headers of a HEAD response are those of the GET, but it carries no content
+    // (RFC 9110 section 9.3.2).
+    if request.method() != http::Method::HEAD {
+        stream
+            .send_data(Bytes::from(body))
+            .await
+            .context("sending the body")?;
+    }
     stream.finish().await.context("finishing the stream")?;
     Ok(())
 }

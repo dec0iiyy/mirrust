@@ -115,6 +115,22 @@ pub(crate) fn split_long_packet(datagram: &[u8]) -> Result<Option<(LongPacket<'_
     Ok(Some((packet, rest)))
 }
 
+/// The Destination Connection ID of the long-header packet a datagram starts with, whatever its
+/// version or type; `None` for a short header, a truncated header or a connection ID longer than
+/// 20 bytes.
+///
+/// A UDP socket can carry several connections of one client, so the datagrams of one peer are
+/// told apart by this ID.
+#[must_use]
+pub fn destination_connection_id(datagram: &[u8]) -> Option<&[u8]> {
+    let mut reader = Reader::new(datagram);
+    if reader.u8().ok()? & LONG_HEADER == 0 {
+        return None;
+    }
+    reader.u32().ok()?;
+    connection_id(&mut reader).ok()
+}
+
 fn connection_id<'dgram>(reader: &mut Reader<'dgram>) -> Result<&'dgram [u8], Error> {
     let len = usize::from(reader.u8()?);
     if len > MAX_CID_LEN {
@@ -166,5 +182,25 @@ impl LongPacket<'_> {
         buf.drain(..header_len);
         buf.truncate(plain_len);
         Ok(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn destination_connection_id_of_any_long_header() {
+        // Version 0x1a2a3a4a (reserved), a 3-byte DCID, then whatever follows.
+        let long = [0xc0, 0x1a, 0x2a, 0x3a, 0x4a, 0x03, 7, 8, 9, 0x00, 0xff];
+        assert_eq!(destination_connection_id(&long), Some(&[7, 8, 9][..]));
+        // Short header, truncated header, truncated ID, ID over 20 bytes, empty datagram.
+        assert_eq!(destination_connection_id(&[0x40, 0, 0, 0, 1, 0]), None);
+        assert_eq!(destination_connection_id(&[0xc0, 0, 0, 0]), None);
+        assert_eq!(destination_connection_id(&long[..8]), None);
+        let mut too_long = vec![0xc0, 0, 0, 0, 1, 21];
+        too_long.extend([0; 21]);
+        assert_eq!(destination_connection_id(&too_long), None);
+        assert_eq!(destination_connection_id(&[]), None);
     }
 }
