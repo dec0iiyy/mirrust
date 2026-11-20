@@ -62,6 +62,8 @@ pub fn start(
         cache,
         certs,
         challenges,
+        #[cfg(test)]
+        http: None,
     };
     eprintln!(
         "acme: --domain means you accept the Let's Encrypt Subscriber Agreement, \
@@ -95,6 +97,9 @@ struct Client {
     cache: CertCache,
     certs: Arc<CurrentCert>,
     challenges: AcmeChallenges,
+    /// Tests give the account an in-process CA instead of the network.
+    #[cfg(test)]
+    http: Option<fake_ca::HttpFactory>,
 }
 
 impl Client {
@@ -234,7 +239,13 @@ impl Client {
 
     /// The account: restored from the cache, or created and saved.
     async fn account(&self) -> anyhow::Result<Account> {
-        let http = || Account::builder().context("setting up the HTTPS client");
+        let http = || {
+            #[cfg(test)]
+            if let Some(factory) = &self.http {
+                return Ok(Account::builder_with_http(factory()));
+            }
+            Account::builder().context("setting up the HTTPS client")
+        };
         let saved = self.cache.account().context("reading the saved account")?;
         if let Some(json) = saved {
             match serde_json::from_str::<AccountCredentials>(&json) {
@@ -461,6 +472,9 @@ fn describe(span: Duration) -> String {
 }
 
 #[cfg(test)]
+mod fake_ca;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -564,6 +578,7 @@ mod tests {
             cache,
             certs: Arc::new(CurrentCert::new()),
             challenges: AcmeChallenges::new(),
+            http: None,
         };
         (client, base)
     }

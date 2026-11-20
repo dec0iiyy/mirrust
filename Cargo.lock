@@ -1547,12 +1547,14 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "audit",
+ "base64 0.23.1",
  "bytes",
  "fingerprint",
  "h2",
  "h3",
  "h3-quinn",
  "http",
+ "http-body",
  "http2",
  "http3",
  "instant-acme",
@@ -1562,8 +1564,10 @@ dependencies = [
  "rcgen",
  "rustls",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-rustls",
+ "x509-parser",
 ]
 
 [[package]]
