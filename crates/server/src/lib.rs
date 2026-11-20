@@ -28,6 +28,7 @@ mod report;
 mod request_log;
 mod routes;
 mod sniff;
+mod syn;
 mod text;
 
 use std::io;
@@ -174,6 +175,8 @@ pub async fn serve(
     config: Arc<Config>,
 ) -> io::Result<()> {
     let acceptor = TlsAcceptor::from(tls);
+    // From here on the kernel keeps each connection's SYN, where it can (Linux).
+    syn::keep(&listener);
     loop {
         let (stream, peer) = match listener.accept().await {
             Ok(accepted) => accepted,
@@ -207,6 +210,7 @@ async fn handle(
     config: &Config,
     deadline: Instant,
 ) -> io::Result<()> {
+    let syn = syn::saved(&stream);
     let (buffered, hello) = by(deadline, read_client_hello(&mut stream)).await?;
     if let Some(challenges) = &config.challenges
         && AcmeChallenges::is_challenge(&hello)
@@ -234,8 +238,11 @@ async fn handle(
     let details = TlsDetails::new(&hello, negotiated, Transport::Tcp);
 
     match alpn.as_deref() {
-        Some(b"h2") => by(deadline, http2_handler::serve(tls, peer, details, config)).await,
-        _ => by(deadline, http1::serve(tls, peer, details, config)).await,
+        Some(b"h2") => {
+            let served = http2_handler::serve(tls, peer, syn, details, config);
+            by(deadline, served).await
+        }
+        _ => by(deadline, http1::serve(tls, peer, syn, details, config)).await,
     }
 }
 

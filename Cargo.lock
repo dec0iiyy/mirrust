@@ -1566,6 +1566,8 @@ dependencies = [
  "rustls",
  "serde_json",
  "sha2",
+ "tcp-save-syn",
+ "tcpip",
  "tokio",
  "tokio-rustls",
  "x509-parser",
@@ -1679,6 +1681,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "tcp-save-syn"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f802ebbfdca4d240725f3dcf8e4c1935eeb47528a296c80f6a92ec8d665f8dab"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

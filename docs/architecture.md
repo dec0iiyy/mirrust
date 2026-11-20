@@ -9,15 +9,15 @@ audit         consistency checks and score                                   (no
 http2         HTTP/2 frame parser, Akamai fingerprint, one-request responder (tokio I/O traits only)
 quic          QUIC Initial decryption and CRYPTO reassembly                  (rustls::quic for crypto)
 http3         HTTP/3 SETTINGS, unidirectional stream types, fingerprint      (no I/O)
-tcpip         TCP SYN parser, tcp_syn details, p0f signature                 (no I/O, not used by server yet)
+tcpip         TCP SYN parser, tcp_syn details, p0f signature                 (no I/O)
 server        mirrust binary: listeners, TLS, HTTP/1, HTTP/2, HTTP/3, routes, request log
 fpdiff        (crates/diff) fingerprint comparison, library and CLI; uses fingerprint
 golden        snapshot files under corpus/ for the tests; a dev-dependency only
 ```
 
-`server` depends on `fingerprint`, `audit`, `http2`, `http3` and `quic`; it does not depend on
-`tcpip`. The parsing crates take bytes and return values; they do not open sockets, so they can
-be used offline on captured data and are tested on the corpus without a network.
+`server` depends on `fingerprint`, `audit`, `http2`, `http3`, `quic` and `tcpip`. The parsing
+crates take bytes and return values; they do not open sockets, so they can be used offline on
+captured data and are tested on the corpus without a network.
 
 The workspace forbids `unsafe` code (`unsafe_code = "forbid"`) and is kept free of warnings
 under `cargo clippy --workspace --all-targets -- -D warnings` (pedantic lints enabled).
@@ -46,6 +46,14 @@ accept ──► read ClientHello records ──► ALPN acme-tls/1? ──yes�
                                                  request log, stdout line
 ```
 
+0. **Take the SYN from the kernel (Linux).** `serve` sets `TCP_SAVE_SYN` on the listening
+   socket, and the kernel then keeps the SYN of every connection it accepts, from the IP
+   header to the end of the TCP header. `handle` reads it with `TCP_SAVED_SYN` as its first
+   act (`crates/server/src/syn.rs`), and `tcpip::Syn::parse` turns it into the report's
+   `tcpip.tcp_syn` and `tcpip.p0f` and into the `Syn` the `audit` judges `tcp_os` and
+   `tcp_mss` on. Where the options do not exist, or the kernel has nothing, there is no SYN
+   and the report says "not measured"; nothing fails. See
+   [Known gaps](#known-gaps) for what this does not cover.
 1. **Capture the ClientHello before rustls.** rustls does not expose the raw ClientHello, so
    the server reads TLS records off the socket itself until one whole handshake message is
    assembled (it may span several records). The first record must be a handshake record and the
@@ -261,6 +269,25 @@ directly.
   connection). `ServerConfig::builder()` without an installed default works only while one
   provider feature of rustls is compiled in, and panics at first use once a dependency turns
   on a second.
+- **The SYN comes from the kernel, through one small dependency.** `TCP_SAVE_SYN` and
+  `TCP_SAVED_SYN` need no packet capture, no root and no `CAP_NET_RAW`, no table that pairs
+  packets with connections, and have no race between capture and handler; a retransmitted
+  SYN does not replace the saved one. The unit's sandbox allows them: `getsockopt` and
+  `setsockopt` are in systemd's `@network-io` set, which `@system-service` includes
+  (`src/shared/seccomp-util.c` in systemd, read on 2026-11-20), and `RestrictAddressFamilies=`
+  concerns `socket()` only.
+  Calling `getsockopt` takes `unsafe`, which this workspace forbids, and the usual wrappers
+  do not have these two options (checked in socket2 0.6.5, nix 0.31.2 and rustix 1.1.6,
+  none of which has a `getsockopt` for an arbitrary option either). The `tcp-save-syn` crate,
+  version 0.1.0, does: 186 lines, two `unsafe` blocks (a `setsockopt` with an `i32`, and a
+  `getsockopt` into a 128-byte buffer on the stack, whose returned length the kernel keeps
+  within the one it was given), `libc` as its only dependency (already in the tree, one
+  copy), Apache-2.0, and functions that exist and do nothing on other systems, so the server
+  has no conditional code for this. All of it was read before it was added, and the archive
+  that was read has the SHA-256 that `Cargo.lock` pins. It is a single release by one
+  publisher, from January 2026, which is why it was read rather than trusted: read it again
+  when its version changes. Its one weakness as an API is that it takes `AsRawFd`, not
+  `AsFd`; the server passes it tokio's own listener and stream.
 - **Capture before the TLS library.** Reading the ClientHello from the socket and replaying it
   keeps the exact bytes the client sent, independent of what rustls parses or exposes, and the
   same code works for any rustls version.
@@ -327,31 +354,31 @@ directly.
 
 ## Known gaps
 
-- **SYN capture is not wired.** `crates/tcpip` parses SYN packets, but the server does not
-  capture them, so `tcpip` is always `{"ip": {}, "tcp": {}}` and `tcp_syn` / `p0f` are absent.
-  The ACK-derived `tcpip.ip` / `tcpip.tcp` fields are not produced at all. In the `audit`, the
-  check `tcp_os` has the status `skip` and `tcp_mss` is left out. The plan for Linux below is
-  a design that has not been implemented or tried:
-  - Set `TCP_SAVE_SYN` (27) on the listening socket before `listen()` (Linux 4.2 or later;
-    build the listener with `socket2`, then `tokio::net::TcpListener::from_std`). Accepted
-    sockets inherit it.
-  - After `accept`, before TLS, read up to 512 bytes of `TCP_SAVED_SYN` (28) with `getsockopt`.
-    The kernel returns that connection's SYN from the IP header on, with TCP options, which is
-    exactly `Syn::parse`'s input, and frees it after the first read. Put
-    `TcpIp::new(Syn::parse(...))` in the report in place of the fixed object; an empty or failed
-    read gives `TcpIp::default()`.
-  - This needs no pcap, no root or `CAP_NET_RAW`, no address-keyed table, and has no race
-    between capture and handler. A retransmitted SYN does not replace the saved one.
-  - `socket2` has no wrapper for these options. Use `nix` if it has one; otherwise a small
-    Linux-only crate that wraps the two `libc` calls behind a safe API, outside the workspace's
-    `unsafe_code = "forbid"`. Other platforms: no-op.
-  - Expected differences from packet capture: only headers are saved, so `payload_len` is 0 and
-    p0f's payload class is `0` for TCP Fast Open SYNs; a connection accepted through a SYN cookie
-    has no saved SYN; `ip` / `tcp` stay `{}`. (`TCP_SAVE_SYN = 2`, Linux 5.10+, also saves the
-    link-layer header, which is not needed.)
-  - Fallback if TFO payloads or the ACK-derived fields are needed: an `AF_PACKET` socket with a
-    classic BPF filter for the TLS port, read in a blocking thread into a bounded map keyed by
-    client `ip:port` with expiry (first SYN wins).
+- **SYN capture is for Linux and TCP only, and has not run yet.** The code was written on
+  macOS, where the socket options do not exist and no Linux target was installed to compile
+  for: the first build and run of the Linux path is CI's (`tcpip_has_the_syn_where_the_kernel_keeps_it`
+  in `crates/server/tests/api.rs`, whose Linux branch asserts the fields of a loopback SYN).
+  Until a report from a Linux server has been looked at, treat `tcpip.tcp_syn`, `p0f` and
+  the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic. What is known to be
+  missing or different from a packet capture:
+  - Only the headers are kept, so `payload_len` is 0 and p0f's payload class is `0` also for a
+    TCP Fast Open SYN. `tcpip.ip` and `tcpip.tcp`, which tls.peet.ws fills from the client's
+    ACK, stay `{}`.
+  - No SYN: on macOS and Windows; over HTTP/3, which has no TCP; for a connection accepted
+    through a SYN cookie; for a connection whose SYN came before the option was set, in the
+    moment between `bind` and `serve`; on a kernel before 4.2; where the sandbox refuses the
+    option (gVisor); and for a SYN whose IP and TCP headers are over 128 bytes, the buffer of
+    the `tcp-save-syn` crate (an IPv6 SYN with extension headers, which `tcpip` does not read
+    anyway). In every one of these the report is what it was before: `tcpip` is
+    `{"ip": {}, "tcp": {}}`, `tcp_os` is `skip` and `tcp_mss` is left out.
+  - Behind a TCP proxy or a load balancer the SYN is the proxy's, like the ClientHello behind
+    a TLS-terminating one. Docker's userland proxy, which carries connections that the host
+    makes to a published port, is such a proxy; connections from outside reach the
+    container through address translation and keep the client's SYN, with the container's
+    address as its destination. Neither was tried.
+  - If the ACK-derived fields or Fast Open payloads are ever needed, the way is an `AF_PACKET`
+    socket with a BPF filter for the port, read in a blocking thread into a bounded map keyed
+    by the client's address and port (first SYN wins). That needs `CAP_NET_RAW`.
 - **`http3` is incomplete.** It has the client's SETTINGS, its unidirectional stream types and
   a fingerprint of both ([fingerprints.md](fingerprints.md#92-the-http3-object)). Missing parts:
   - The pseudo-header order of the request, and with it an Akamai-style last part of the

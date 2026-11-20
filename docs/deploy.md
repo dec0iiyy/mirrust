@@ -600,13 +600,15 @@ the built-in ACME client the whole deployment is `docker run` with `--domain` an
 
 ## What is not there yet
 
-- **TCP SYN fingerprinting.** The workspace has a SYN parser (`crates/tcpip`), but the server
-  does not capture SYN packets, so `tcpip` in every report is `{"ip": {}, "tcp": {}}` and the
-  `audit` check `tcp_os` is reported as not measured. The plan is the Linux socket options
-  `TCP_SAVE_SYN` and `TCP_SAVED_SYN`; see [architecture.md](architecture.md#known-gaps). If that
-  works as planned, it needs no extra privileges and the unit would not have to change. The
-  fallback described there, a packet socket, would need `CAP_NET_RAW` and `AF_PACKET` added to
-  the unit.
+- **TCP SYN fingerprinting that has been seen to work.** On Linux the server asks the kernel
+  to keep each connection's SYN (`TCP_SAVE_SYN`, `TCP_SAVED_SYN`) and reports it as
+  `tcpip.tcp_syn` and `tcpip.p0f`. It needs no extra privilege and no change to the unit:
+  the two system calls are in the unit's `SystemCallFilter=@system-service`. But the code was
+  written on macOS and has not run on a Linux server yet, so check a report after you deploy:
+  `curl -s https://your.host/api/all | jq .tcpip` should show a `tcp_syn` object with your
+  client's address, and the `audit` should have a `tcp_os` check that is not `skip`. If
+  `tcpip` is `{"ip": {}, "tcp": {}}`, the kernel or the sandbox does not provide the option
+  and everything else works as before. See [architecture.md](architecture.md#known-gaps).
 - **Nothing on port 80.** There is no HTTP listener and no redirect to HTTPS. The ACME
   validation does not need one.
 - **No reload.** With certificate files, a new certificate needs a restart; so does a log file

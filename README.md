@@ -165,15 +165,16 @@ machine with systemd (its dry run and its parts are tested; see
 
 ## Status
 
-Version 0.1.2. 301 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
+Version 0.1.2. 349 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
 in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container image is built
 and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
 unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with
-Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client against Let's Encrypt (its CA
-exchange has no test), `mirrust install` on a systemd machine, log rotation and HTTP/3 in the
-container. The server does not capture TCP
-SYN packets yet, so the TCP checks show as not measured. Details are in
-[Reference](docs/reference.md#status).
+Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client against Let's Encrypt (its
+exchange is tested against a fake CA in the test suite only), `mirrust install` on a systemd
+machine, log rotation and HTTP/3 in the container. On Linux the server takes each connection's
+TCP SYN from the kernel for the TCP checks of the `audit`; that code was written on macOS and
+has not run on Linux yet, and on macOS and Windows the TCP checks show as not measured.
+Details are in [Reference](docs/reference.md#status).
 
 ## License
 

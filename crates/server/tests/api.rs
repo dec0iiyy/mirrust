@@ -328,3 +328,38 @@ fn a_request_body_is_not_read_as_headers() {
         serde_json::json!(["Host: localhost", "Content-Length: 9"])
     );
 }
+
+#[test]
+fn tcpip_has_the_syn_where_the_kernel_keeps_it() {
+    let (_runtime, addr, roots) = start();
+    let (_, body) = get(addr, roots, "/api/all");
+    let json: Value = serde_json::from_str(&body).expect("JSON body");
+    let tcpip = &json["tcpip"];
+    let checks = json["audit"]["checks"].as_array().expect("checks");
+    let tcp_os = checks
+        .iter()
+        .find(|check| check["id"] == "tcp_os")
+        .expect("the tcp_os check");
+    if cfg!(target_os = "linux") {
+        // Linux keeps the SYN of a connection for a listening socket with TCP_SAVE_SYN.
+        // This branch has run in CI only: the code was written on macOS.
+        let syn = &tcpip["tcp_syn"];
+        assert_eq!(syn["ip_version"], 4, "{tcpip}");
+        assert_eq!(syn["src_ip"], "127.0.0.1");
+        assert_eq!(syn["dst_ip"], "127.0.0.1");
+        assert_eq!(syn["dst_port"], addr.port());
+        assert!(syn["mss"].as_u64().is_some_and(|mss| mss > 0), "{syn}");
+        assert!(syn["ttl"].as_u64().is_some_and(|ttl| ttl > 0), "{syn}");
+        assert_eq!(syn["payload_len"], 0, "the kernel keeps the headers only");
+        assert!(
+            tcpip["p0f"]
+                .as_str()
+                .is_some_and(|p0f| p0f.starts_with("4:")),
+            "{tcpip}"
+        );
+        assert_ne!(tcp_os["status"], "skip", "{tcp_os}");
+    } else {
+        assert_eq!(tcpip, &serde_json::json!({ "ip": {}, "tcp": {} }));
+        assert_eq!(tcp_os["status"], "skip");
+    }
+}

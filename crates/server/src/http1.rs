@@ -26,6 +26,7 @@ const CLOSE_DELAY: Duration = Duration::from_millis(500);
 pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     peer: SocketAddr,
+    syn: Option<tcpip::Syn>,
     tls: TlsDetails,
     config: &Config,
 ) -> io::Result<()> {
@@ -34,6 +35,7 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     let mut report = parse(&request[..head.unwrap_or(request.len())]);
     report.http1_cut = head.is_none();
     report.ip = peer.to_string();
+    report.syn = syn;
     report.tls = Some(tls);
 
     let options = report.method == "OPTIONS";

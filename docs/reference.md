@@ -68,9 +68,9 @@ Flags, API, fields, the request log and the workspace. For the short version see
 - the `audit`: the checks that compare these layers, each with a status and the values it
   compared.
 
-The workspace also contains a TCP SYN parser that produces the `tcp_syn` details and a p0f v3
-signature. The server does not capture SYN packets yet; see
-[docs/architecture.md](architecture.md#known-gaps).
+On Linux, for TCP connections, it also reports the TCP SYN: the `tcp_syn` details and a p0f v3
+signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). This has not run on
+Linux yet; see [docs/architecture.md](architecture.md#known-gaps).
 
 The JSON layout follows tls.peet.ws, so tools written against that service can read
 mirrust's output. See [Compatibility with tls.peet.ws](#compatibility-with-tlspeetws).
@@ -97,13 +97,16 @@ and unidirectional stream types. The `audit` uses only these.
 
 Not measured yet:
 
-- **TCP SYN.** The parser in `crates/tcpip` is tested on recorded packets, but the server does
-  not capture SYN packets. `tcpip` is always `{"ip": {}, "tcp": {}}`, the `audit` check
-  `tcp_os` has the status `skip` ("Not measured"), and `tcp_mss` does not appear.
+- **TCP SYN, except on Linux, and there not yet seen working.** The parser in `crates/tcpip`
+  is tested on recorded packets. On Linux the server takes the SYN of each TCP connection
+  from the kernel and fills `tcpip.tcp_syn` and `tcpip.p0f`; that path was written on macOS
+  and its first run is the CI test on Ubuntu. On macOS and Windows, and over HTTP/3, `tcpip`
+  is `{"ip": {}, "tcp": {}}`, the `audit` check `tcp_os` has the status `skip` ("Not
+  measured"), and `tcp_mss` does not appear.
 - **The HTTP/3 request's pseudo-header order**, so the HTTP/3 fingerprint covers SETTINGS and
   stream types only. It is not in `/api/clean` or in the request log.
 
-Tested: `cargo test --workspace` (301 tests), clippy, `cargo fmt --all --check` and the build
+Tested: `cargo test --workspace` (349 tests), clippy, `cargo fmt --all --check` and the build
 with Rust 1.88 in CI on Ubuntu and macOS, and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
 
@@ -350,7 +353,7 @@ The keys come in this order: `ip`, `http_version`, `method`, `user_agent`, `tls`
 | `http2` | HTTP/2 only: `akamai_fingerprint`, `akamai_fingerprint_hash`, `sent_frames`. |
 | `quic` | HTTP/3 only: `version`, `dcid_length`, `scid_length`, `token_length`, `initial_datagrams`, `initial_datagram_sizes`, read from the client's Initial packets. Absent when they were not captured. |
 | `http3` | HTTP/3 only: `fingerprint`, `fingerprint_hash`, `settings` (the client's SETTINGS as `{id, name, value}` in wire order) and `streams` (the unidirectional streams it opened as `{id, type, name}`), as of the connection's first request. |
-| `tcpip` | Always `{"ip": {}, "tcp": {}}` until SYN capture is added. |
+| `tcpip` | `{"ip": {}, "tcp": {}}`, and on Linux, for a TCP connection whose SYN the kernel kept, also `tcp_syn` and `p0f` ([fingerprints.md](fingerprints.md#10-tcp-syn-and-p0f)). |
 | `client` | The known client the TLS fingerprint matches, and whether the `User-Agent` agrees; below. |
 | `audit` | A consistency score from 0 to 100, a verdict (`consistent`, `suspicious` or `inconsistent`), and the checks behind it: `User-Agent` against the TLS stack, TLS against HTTP/2, request headers, and more. `null` when `tls` is `null`. See [docs/fingerprints.md](fingerprints.md#audit). |
 
@@ -561,7 +564,7 @@ the server keeps serving, and the entries it can no longer queue are counted as 
 | `http2` | `crates/http2` | HTTP/2 frame capture, Akamai fingerprint, and the one-request HTTP/2 responder. |
 | `quic` | `crates/quic` | Extracts the ClientHello from a client's QUIC v1/v2 Initial packets, without a QUIC stack. |
 | `http3` | `crates/http3` | HTTP/3 SETTINGS and unidirectional stream types from the first bytes of each stream, and their fingerprint. Parsing only. |
-| `tcpip` | `crates/tcpip` | Parses a captured TCP SYN (from the IP header on) into `tcp_syn` details and a p0f v3 signature. Parsing only. |
+| `tcpip` | `crates/tcpip` | Parses a captured TCP SYN (from the IP header on) into `tcp_syn` details and a p0f v3 signature. Parsing only; the server gives it the SYN the Linux kernel saved. |
 | `server` | `crates/server` | The `mirrust` binary: TLS, HTTP/1.1, HTTP/2, HTTP/3, routes, request log. |
 | `fpdiff` | `crates/diff` | The `fpdiff` binary and library: semantic diff of two TLS (and HTTP/2) fingerprints. |
 | `golden` | `crates/golden` | Test support: the snapshot files under `corpus/` and the bless mode. Not used by the server. |
@@ -612,7 +615,7 @@ the server. Tests check that it parses, that its JA4s are unique and are the has
 Other tests cover the JA4 worked example from the FoxIO specification, the RFC 9001 Appendix A
 QUIC Initial, a recorded Chrome QUIC Initial split over two datagrams, and the server end to end
 over HTTP/1.1, HTTP/2 and HTTP/3 with an in-process client, including the connection limit,
-the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 301 tests.
+the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 349 tests.
 
 ## Compatibility with tls.peet.ws
 
@@ -638,7 +641,8 @@ under its usual name and adds the specified one:
   reads 1024 bytes and also lists the request line and body lines that contain a `:`
   ([fingerprints.md](fingerprints.md#7-http1)). An HTTP/1.1 response ends with its body;
   tls.peet.ws adds two CRLFs.
-- `tcpip` is present but empty until SYN capture is wired.
+- `tcpip` has `tcp_syn` and `p0f` only on Linux and only for TCP; its `ip` and `tcp`
+  objects, which tls.peet.ws fills from a packet capture, are always empty.
 - A few display names differ: five that tls.peet.ws gives the wrong code point (such as
   `ed25519` for `0x0808`, which is `ed448`) are corrected, and 93 code points it prints as
   numbers have their IANA names ([fingerprints.md](fingerprints.md#6-readable-ciphers-and-extension-details)).

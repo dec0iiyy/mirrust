@@ -104,6 +104,9 @@ pub(crate) struct Report {
     /// JSON: the router reads it to choose between the page and the text report.
     pub(crate) accept: String,
     pub(crate) tls: Option<TlsDetails>,
+    /// The TCP SYN of the connection, where the kernel kept it (see [`crate::syn`]); `None`
+    /// leaves `tcpip` without `tcp_syn` and `p0f`.
+    pub(crate) syn: Option<tcpip::Syn>,
     /// HTTP/1 header lines in order; `None` leaves `http1` out of the JSON.
     pub(crate) http1_headers: Option<Vec<String>>,
     /// The HTTP/1 request head did not fit the read buffer or ended early, so `http1_headers` may
@@ -153,8 +156,13 @@ impl Report {
             );
         }
         // `tcpip` is a non-pointer struct whose `ip` and `tcp` are structs too, so Go's
-        // `omitempty` never drops them, even with packet capture off.
-        fields.insert("tcpip".into(), json!({ "ip": {}, "tcp": {} }));
+        // `omitempty` never drops them, even with packet capture off. `tcp_syn` and `p0f`
+        // are there when the SYN is.
+        let tcpip = tcpip::TcpIp::new(self.syn.clone());
+        fields.insert(
+            "tcpip".into(),
+            serde_json::to_value(tcpip).expect("the tcpip object always serializes"),
+        );
         fields.insert("client".into(), self.client_json());
         fields.insert("audit".into(), self.audit_json());
         out
@@ -182,6 +190,12 @@ impl Report {
         let hello = ClientHello::parse(&tls.raw);
         let mut input = audit::Input::new(&hello, &self.user_agent);
         input.known = tls.known;
+        input.syn = self.syn.as_ref().map(|syn| audit::Syn {
+            ttl: syn.details.ttl,
+            mss: syn.details.mss,
+            ipv6: syn.details.ip_version == 6,
+            option_order: &syn.details.option_order,
+        });
         input.akamai = self
             .http2
             .as_ref()
@@ -386,5 +400,62 @@ mod tests {
 
         report.http1_cut = true;
         assert!(!check_ids(&report).contains(&"headers".to_owned()));
+    }
+
+    /// The first packet of `corpus/syn.jsonl`: a SYN from 192.0.2.10 with the options of Linux.
+    fn recorded_syn() -> tcpip::Syn {
+        let hex = "4500003c303940002f060000c000020ac6336414d43101bb0001e24000000000a002faf0\
+                   00000000020405b40402080a010203040000000001030308";
+        let packet: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("hex"))
+            .collect();
+        tcpip::Syn::parse(&packet).expect("a SYN")
+    }
+
+    #[test]
+    fn a_report_with_the_syn_has_tcp_syn_and_p0f_and_is_judged_on_them() {
+        let linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) \
+                     Chrome/160.0.0.0 Safari/537.36";
+        let mut report = Report {
+            user_agent: linux.into(),
+            tls: Some(TlsDetails::default()),
+            ..Report::default()
+        };
+        let without = report.to_json();
+        assert_eq!(without["tcpip"], json!({ "ip": {}, "tcp": {} }));
+        let skipped = report.audit().expect("an audit");
+        let tcp_os = |audit: &audit::Audit| {
+            audit
+                .checks
+                .iter()
+                .find(|check| check.id == "tcp_os")
+                .map(|check| check.status)
+        };
+        assert_eq!(tcp_os(&skipped), Some(audit::Status::Skip));
+        assert!(!check_ids(&report).contains(&"tcp_mss".to_owned()));
+
+        report.syn = Some(recorded_syn());
+        let with = report.to_json();
+        let keys: Vec<&str> = with["tcpip"]
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(keys, ["ip", "tcp", "tcp_syn", "p0f"]);
+        assert_eq!(with["tcpip"]["tcp_syn"]["src_ip"], "192.0.2.10");
+        assert_eq!(with["tcpip"]["tcp_syn"]["mss"], 1460);
+        assert_eq!(
+            with["tcpip"]["p0f"],
+            "4:47+?:0:1460:64240,8:mss,sok,ts,nop,ws:df,id+:0"
+        );
+        let judged = report.audit().expect("an audit");
+        assert_eq!(
+            tcp_os(&judged),
+            Some(audit::Status::Pass),
+            "Linux options under a Linux User-Agent"
+        );
+        assert!(check_ids(&report).contains(&"tcp_mss".to_owned()));
     }
 }

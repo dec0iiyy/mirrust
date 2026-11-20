@@ -15,6 +15,7 @@ use crate::{
 pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     peer: SocketAddr,
+    syn: Option<tcpip::Syn>,
     tls: TlsDetails,
     config: &Config,
 ) -> io::Result<()> {
@@ -43,6 +44,7 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
             method: request.method.clone(),
             user_agent: request.user_agent.clone(),
             accept: header_value(request.headers().iter().map(String::as_str), "accept"),
+            syn,
             tls: Some(tls),
             http2: Some(request.details.clone()),
             ..Report::default()

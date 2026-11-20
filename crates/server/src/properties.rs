@@ -190,7 +190,7 @@ fn serve(runtime: &Runtime, request: &[u8], tls: TlsDetails) -> Result<(), TestC
         client.shutdown().await.expect("in-memory shutdown");
         let mut response = Vec::new();
         let (outcome, read) = tokio::join!(
-            http1::serve(server, peer, tls, &config),
+            http1::serve(server, peer, None, tls, &config),
             client.read_to_end(&mut response),
         );
         read.expect("in-memory read");
