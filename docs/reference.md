@@ -238,8 +238,8 @@ and for what is tested and what is not.
 
 The `--cors-key` prefix is compared with the start of each header line (`Name: value`) without
 regard to ASCII case, so the default `X-CORS` matches `x-cors-…` headers on HTTP/2 and HTTP/3 as
-well. On HTTP/3 only the header names are compared, so a key that contains `: ` never matches
-there. `OPTIONS` requests always get an empty `text/plain` answer with the CORS headers.
+well, and a key with a value part, such as `X-CORS: yes`, works on all three. `OPTIONS`
+requests always get an empty `text/plain` answer with the CORS headers.
 
 Each routed request also prints one line on stdout: `IP METHOD HTTP_VERSION PATH JA3_HASH`.
 `OPTIONS` requests, failed handshakes and failed connections print no such line. `JA3_HASH` is

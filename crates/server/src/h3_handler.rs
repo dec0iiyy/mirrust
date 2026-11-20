@@ -184,6 +184,19 @@ async fn handle(incoming: Incoming, hellos: &ClientHellos, config: &Config) -> a
     }
 }
 
+/// Whether the request carries the CORS key, compared as on HTTP/1.1 and HTTP/2: with the
+/// start of each `name: value` line, so that a key with a value part works here too.
+fn asks_for_cors(headers: &http::HeaderMap, key: &str) -> bool {
+    if key.is_empty() {
+        return false;
+    }
+    let lines: Vec<String> = headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {}", String::from_utf8_lossy(value.as_bytes())))
+        .collect();
+    wants_cors(lines.iter().map(String::as_str), key)
+}
+
 /// Answers one request with the routed report, as the HTTP/2 path does.
 async fn respond(
     request: &Request<()>,
@@ -192,11 +205,7 @@ async fn respond(
     config: &Config,
 ) -> anyhow::Result<()> {
     let options = request.method() == http::Method::OPTIONS;
-    let cors = options
-        || wants_cors(
-            request.headers().keys().map(http::HeaderName::as_str),
-            &config.cors_key,
-        );
+    let cors = options || asks_for_cors(request.headers(), &config.cors_key);
     let (status, body, content_type) = if options {
         (200, Vec::new(), "text/plain")
     } else {
@@ -275,4 +284,22 @@ async fn respond(
     }
     stream.finish().await.context("finishing the stream")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cors_key_is_compared_with_name_and_value_as_on_the_other_protocols() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("accept", "*/*".parse().expect("value"));
+        headers.insert("x-cors", "yes".parse().expect("value"));
+        assert!(asks_for_cors(&headers, "X-CORS"));
+        assert!(asks_for_cors(&headers, "x-cors: yes"));
+        assert!(asks_for_cors(&headers, "X-Cors: y"));
+        assert!(!asks_for_cors(&headers, "x-cors: no"));
+        assert!(!asks_for_cors(&headers, "x-other"));
+        assert!(!asks_for_cors(&headers, ""));
+    }
 }
