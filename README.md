@@ -44,16 +44,31 @@ missing browser headers behind it.
 It is for people who build or test HTTP clients and browser-impersonation libraries, run
 anti-bot or anti-fraud defences, or need to see exactly what a client sends.
 
-## Run it
+## Try it
 
-Download the binary for your system from [Releases](https://github.com/dec0iiyy/mirrust/releases)
-(Linux x86_64 and arm64, macOS, Windows), or build it with Rust 1.88 or later:
+**macOS and Linux** (Intel and ARM). One command downloads the right binary into the current
+folder, checks its checksum, and needs no `sudo`:
 
 ```console
-$ cargo build --release
-$ ./target/release/mirrust
+$ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh -s -- --prefix .
+$ ./mirrust
 listening on https://127.0.0.1:8443 (TCP and HTTP/3 over UDP)
+self-signed certificate: open https://localhost:8443 in a browser and accept the warning, or run: curl -k https://localhost:8443
 ```
+
+**Windows** (PowerShell):
+
+```powershell
+> Invoke-WebRequest https://github.com/dec0iiyy/mirrust/releases/latest/download/mirrust-windows-x86_64.exe -OutFile mirrust.exe
+> .\mirrust.exe
+```
+
+Then, in another terminal, look at it: `open https://localhost:8443` on macOS, `xdg-open
+https://localhost:8443` on Linux, `start https://localhost:8443` on Windows. Or stay in the
+terminal with `curl -k https://localhost:8443`. Stop the server with Ctrl-C. To install it for
+good, run `curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh`,
+which puts `mirrust` in `/usr/local/bin`. To build it yourself you need Rust 1.88 or later:
+`cargo build --release`, then `./target/release/mirrust`.
 
 Open <https://localhost:8443> in a browser for the page: the score, every check behind it, the
 fingerprints, the cipher suites and extensions in the order sent, and the full JSON. The

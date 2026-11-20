@@ -19,11 +19,20 @@ async fn start() -> (SocketAddr, RootCertStore) {
     roots.add(certs[0].clone()).expect("cert is a usable root");
     let tls = Arc::new(tls_config(certs, key).expect("tls config"));
 
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind an ephemeral port");
-    let addr = listener.local_addr().expect("local addr");
-    let udp = std::net::UdpSocket::bind(addr).expect("bind the same port over UDP");
+    // The same port number must be free over UDP too, and another test process may hold it:
+    // try a few ports.
+    let mut bound = None;
+    for _ in 0..50 {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind an ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        if let Ok(udp) = std::net::UdpSocket::bind(addr) {
+            bound = Some((listener, udp, addr));
+            break;
+        }
+    }
+    let (listener, udp, addr) = bound.expect("a port that is free over TCP and UDP");
     let config = Arc::new(Config {
         h3_port: Some(addr.port()),
         ..Config::default()

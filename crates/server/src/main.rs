@@ -298,6 +298,8 @@ async fn main() -> anyhow::Result<()> {
         Command::Run(args) => *args,
     };
     let acme = args.acme.take().map(prepare_acme).transpose()?;
+    // With no certificate files and no --domain the server makes its own certificate.
+    let self_signed = acme.is_none() && args.cert.is_none();
     let tls = if let Some(acme) = &acme {
         args.config.challenges = Some(acme.challenges.clone());
         tls_config_with_resolver(Arc::clone(&acme.certs) as _)
@@ -341,6 +343,13 @@ async fn main() -> anyhow::Result<()> {
         ))
     });
     println!("listening on https://{addr} (TCP and HTTP/3 over UDP)");
+    if self_signed {
+        let port = addr.port();
+        println!(
+            "self-signed certificate: open https://localhost:{port} in a browser and accept \
+             the warning, or run: curl -k https://localhost:{port}"
+        );
+    }
 
     let served = tokio::select! {
         served = async {
