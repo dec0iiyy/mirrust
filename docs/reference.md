@@ -70,7 +70,8 @@ Flags, API, fields, the request log and the workspace. For the short version see
 
 On Linux, for TCP connections, it also reports the TCP SYN: the `tcp_syn` details and a p0f v3
 signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). A test in CI on
-Ubuntu reads a loopback SYN through this path; one live report from the internet showed the `tcp_mss` check passing, which is not yet a survey of real traffic, see
+Ubuntu reads a loopback SYN through this path; one live report from the internet showed the
+`tcp_mss` check passing, which is not yet a survey of real traffic, see
 [docs/architecture.md](architecture.md#known-gaps).
 
 The JSON layout follows tls.peet.ws, so tools written against that service can read
@@ -93,22 +94,28 @@ mirrust's output. See [Compatibility with tls.peet.ws](#compatibility-with-tlspe
 This is version 0.1.4.
 
 Measured today: the TLS ClientHello over TCP and QUIC, the HTTP/1 request headers, the HTTP/2
-frames and Akamai fingerprint, the first flight of a QUIC connection, and the HTTP/3 SETTINGS
-and unidirectional stream types. The `audit` uses only these.
+frames and Akamai fingerprint, the first flight of a QUIC connection, the HTTP/3 SETTINGS
+and unidirectional stream types, and, on Linux for TCP connections, the SYN. The `audit` uses
+only these.
 
-Not measured yet:
+Not measured:
 
-- **TCP SYN, except on Linux, and there not yet seen working.** The parser in `crates/tcpip`
-  is tested on recorded packets. On Linux the server takes the SYN of each TCP connection
-  from the kernel and fills `tcpip.tcp_syn` and `tcpip.p0f`; that path was written on macOS
-  and its first run is the CI test on Ubuntu. On macOS and Windows, and over HTTP/3, `tcpip`
-  is `{"ip": {}, "tcp": {}}`, the `audit` check `tcp_os` has the status `skip` ("Not
-  measured"), and `tcp_mss` does not appear.
+- **TCP SYN on macOS and Windows, and over HTTP/3.** There `tcpip` is `{"ip": {}, "tcp":
+  {}}`, the `audit` check `tcp_os` has the status `skip` ("Not measured"), and `tcp_mss` does
+  not appear.
 - **The HTTP/3 request's pseudo-header order**, so the HTTP/3 fingerprint covers SETTINGS and
   stream types only. It is not in `/api/clean` or in the request log.
 
-Tested: `cargo test --workspace` (349 tests), clippy, `cargo fmt --all --check` and the build
-with Rust 1.88 in CI on Ubuntu and macOS, and on macOS `cargo doc --workspace --no-deps` and
+Not yet seen at scale: the SYN on Linux. The parser in `crates/tcpip` is tested on recorded
+packets. On Linux the server takes the SYN of each TCP connection from the kernel and fills
+`tcpip.tcp_syn` and `tcpip.p0f`; that path was written on macOS, a CI test on Ubuntu reads a
+loopback SYN through it, and one report from a server on the internet showed the `tcp_mss`
+check passing. Middleboxes and NAT change TTL, MSS and options on the way, so treat the TCP
+checks as unproven on real traffic.
+
+Tested: `cargo test --workspace` (349 tests) in CI on Ubuntu, macOS and Windows; clippy and
+`cargo fmt --all --check` in CI on Ubuntu; `cargo check` of all targets with Rust 1.88, the
+minimum supported version, in CI on Ubuntu; and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
 
 Run on a server: on Ubuntu 24.04 (x86_64, systemd 255), the release binary built in CI
@@ -188,7 +195,8 @@ active at the end. `uninstall` runs `systemctl disable --now mirrust.service` (a
 reported and ignored), removes the unit and `/usr/local/bin/mirrust`, and runs `systemctl
 daemon-reload`; it keeps `/var/lib/mirrust` and `/var/log/mirrust`.
 
-The live path of both has not been run on a machine with systemd; see
+The live path of `install` has run on an Ubuntu 24.04 server on the internet; that of
+`uninstall` has not been run on a machine with systemd. See
 [deploy.md](deploy.md#what-was-tested).
 
 ### Built-in ACME

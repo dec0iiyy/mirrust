@@ -354,11 +354,12 @@ directly.
 
 ## Known gaps
 
-- **SYN capture is for Linux and TCP only, and is proven on a loopback connection in CI, plus one report from a server on the internet.** The
-  code was written on macOS, where the socket options do not exist; its first build and run
-  was CI's on Ubuntu (`tcpip_has_the_syn_where_the_kernel_keeps_it` in
-  `crates/server/tests/api.rs`), which reads the SYN of a loopback connection, checks its
-  fields and the `tcp_os` check with a Linux `User-Agent`. The kernel keeps only the SYNs
+- **SYN capture is for Linux and TCP only, and is proven on a loopback connection in CI, plus
+  one report from a server on the internet.** The code was written on macOS, where the socket
+  options do not exist; its first build and run was CI's on Ubuntu
+  (`tcpip_has_the_syn_where_the_kernel_keeps_it` in `crates/server/tests/api.rs`), which reads
+  the SYN of a loopback connection, checks its fields and the `tcp_os` check with a Linux
+  `User-Agent`. The kernel keeps only the SYNs
   that arrive after the option is set, so `keep_syn` runs right after the port is bound.
   Until more reports from real clients have been looked at, treat `tcpip.tcp_syn`,
   `p0f` and the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic (middleboxes
@@ -459,8 +460,9 @@ directly.
 - **Running out of file descriptors.** A failed `accept` is reported on stderr and retried
   after 100 ms, so the server keeps running, but it serves nobody while the limit is hit. Keep
   the open-file limit above `--max-connections`.
-- **Failed QUIC handshakes are not logged**, and connections in progress are not drained on
-  shutdown.
+- **Failed QUIC handshakes get no request-log line**, as a failed TLS handshake over TCP does;
+  they are only counted in the failure summary on stderr. Connections in progress are not
+  drained on shutdown.
 - **The request log stops after a write error** (a full disk, a removed directory). Nothing
   reopens the file; restart the service. See [deploy.md](deploy.md#6-rotate-the-request-log).
 - **The stdout line per request is a blocking write** made on the connection's task. If

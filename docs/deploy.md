@@ -15,12 +15,16 @@ dynamic user, kept its request log in `/var/log/mirrust/`, answered over HTTP/1.
 restart (peak memory about 3.5 MB), logged failed connections, and stopped cleanly on
 `systemctl stop`.
 
-What has not been run: the built-in ACME client against Let's Encrypt, staging or production
-(see [What the tests cover](#what-the-tests-cover-and-what-they-do-not)), the current
-`mirrust.service` with `StateDirectory=` on a real server, port 443 (so
-`CAP_NET_BIND_SERVICE` was not exercised), IPv6, the firewall steps, the logrotate rules and
-the Docker image. Check those before you rely on them. `mirrust install` has the same
-status: see [its section](#install-with-mirrust-install) for what was tested.
+Since then, on an Ubuntu 24.04 server on the internet, `mirrust install` has installed the
+current `mirrust.service` (with `StateDirectory=` and `CAP_NET_BIND_SERVICE`, on port 443), and
+the built-in ACME client has obtained a certificate from Let's Encrypt, staging and then
+production. The server answered over HTTP/1.1 and HTTP/2. See
+[Install with `mirrust install`](#install-with-mirrust-install) and
+[What the tests cover](#what-the-tests-cover-and-what-they-do-not).
+
+What has not been run: IPv6, the firewall steps, the logrotate rules, certificate renewal
+(about 30 days before expiry), and HTTP/3 against that server and in the Docker image. Check
+those before you rely on them.
 
 You need:
 
@@ -158,10 +162,11 @@ exactly what will be written. It does not check the system (a dry run on a Mac w
 
 The functions that decide what is written (the unit derived from the template, the flag checks,
 the host checks, the plan) are unit-tested, and `--dry-run`, the flag errors and `--help` are
-tested by running the binary. **The live path has not been run:** the file writes under `/etc`
-and `/usr/local/bin`, the `systemctl` calls, the wait and the messages after them have never
-run on a machine with systemd, because they were written on a Mac. Run it first on a server you
-can rebuild, with `--acme-staging`, and read the journal.
+tested by running the binary. **The live path of `install` has run** on an Ubuntu 24.04 server
+on the internet: the file writes under `/etc` and `/usr/local/bin`, the `systemctl` calls, the
+wait and the messages after them, after which the server got its certificate from Let's
+Encrypt. `uninstall` has not been run on a machine with systemd. On a server you keep, run
+`install` first with `--acme-staging` and read the journal.
 
 ## 1. Get the binary
 
@@ -336,12 +341,12 @@ renewal time, the cache and its permissions, and the backoff. Against an in-proc
 validation, a CA that does not finish validating, `badNonce`, and a saved account the CA no
 longer knows.
 
-Not exercised: the exchange with a real CA, that is, the account, order, validation and
-finalisation calls that the `instant-acme` library makes. Nothing here proves that Let's
-Encrypt, staging or production, accepts the challenge certificate or that the issued
-certificate installs. mirrust has only been started against a CA it could not reach, where it
-printed one failure line with a 5-minute wait. Run it once with `--acme-staging` on the real
-server before relying on it.
+These tests do not reach a real CA. The exchange with one, the account, order, validation and
+finalisation calls that the `instant-acme` library makes, has run on an Ubuntu 24.04 server
+on the internet: Let's Encrypt staging and then production issued a certificate. Not
+exercised: renewal, which happens about 30 days before expiry. Against a CA it could not
+reach, mirrust printed one failure line with a 5-minute wait. On a new server, run it once
+with `--acme-staging` before relying on it.
 
 ## 4. Install the service
 
@@ -597,11 +602,13 @@ the built-in ACME client the whole deployment is `docker run` with `--domain` an
 
 ## What is not there yet
 
-- **TCP SYN fingerprinting that has been seen to work.** On Linux the server asks the kernel
-  to keep each connection's SYN (`TCP_SAVE_SYN`, `TCP_SAVED_SYN`) and reports it as
+- **TCP SYN fingerprinting has had one look on real traffic.** On Linux the server asks the
+  kernel to keep each connection's SYN (`TCP_SAVE_SYN`, `TCP_SAVED_SYN`) and reports it as
   `tcpip.tcp_syn` and `tcpip.p0f`. It needs no extra privilege and no change to the unit:
-  the two system calls are in the unit's `SystemCallFilter=@system-service`. But the code was
-  written on macOS and has not run on a Linux server yet, so check a report after you deploy:
+  the two system calls are in the unit's `SystemCallFilter=@system-service`. The code was
+  written on macOS. A CI test on Ubuntu reads the SYN of a loopback connection, and one report
+  from a server on the internet showed the `tcp_mss` check passing; that is not a survey of
+  real clients. Check a report after you deploy:
   `curl -s https://your.host/api/all | jq .tcpip` should show a `tcp_syn` object with your
   client's address, and the `audit` should have a `tcp_os` check that is not `skip`. If
   `tcpip` is `{"ip": {}, "tcp": {}}`, the kernel or the sandbox does not provide the option
