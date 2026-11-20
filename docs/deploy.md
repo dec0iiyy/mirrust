@@ -288,6 +288,13 @@ refuses to start and asks for an explicit `--domain`. That is also what happens 
 server whose public address is a NAT mapping of a private one, so give such a server its name.
 `auto` stands for the whole certificate and cannot be combined with other names.
 
+sslip.io is not on the Public Suffix List (checked in the list of 2026-11-20), so Let's Encrypt
+counts every `A-B-C-D.sslip.io` name as one registered domain with all other users of the
+service, and its limit of 50 certificates per registered domain per week is shared by them. The
+sslip.io operators say Let's Encrypt has raised their limit (to 250,000 a week, <https://nip.io>),
+but an order can still be refused for that reason; the error text then names the rate limit.
+For a server you keep, use a name of your own.
+
 **The cache.** `--acme-dir` is created with mode 0700 if it does not exist, and holds, in a
 subdirectory per CA, `account.json` (the ACME account key), `private-key.pem`,
 `certificate.pem`, `names.txt` and, after a failed attempt, `last-failure.txt`, all with mode
@@ -295,6 +302,14 @@ subdirectory per CA, `account.json` (the ACME account key), `private-key.pem`,
 restarts: a restart that finds a valid certificate for the same names does not ask Let's
 Encrypt again. A cached certificate for other names, or one that has expired, is ignored. A
 directory that already exists is used as it is, so check its mode.
+
+**IPv6.** If the name has an `AAAA` record, Let's Encrypt connects over IPv6 first and, if
+that connection fails for any reason, tries IPv4 (`va/tlsalpn.go` in Boulder, the Let's Encrypt
+software). So a server that listens on IPv4 only (`--listen 0.0.0.0:443`) still validates when
+the `AAAA` address does not answer or refuses the connection. It fails when the `AAAA` address
+is another machine that does answer on port 443 (a stale record, a CDN), because there is no
+retry after a connection that succeeded: fix or remove that record, or listen on `[::]:443`
+(see [Listening address](#listening-address)) when the `AAAA` address is this server's.
 
 **Port.** Let's Encrypt validates on TCP port 443 only. If you give `--listen` another port,
 mirrust still starts but prints a warning, and issuance fails unless something forwards TCP 443

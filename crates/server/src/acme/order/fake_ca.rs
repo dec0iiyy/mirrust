@@ -1023,6 +1023,47 @@ async fn the_ca_sees_the_challenge_entry_installed_before_it_is_told_to_validate
     assert!(outcome.is_err(), "no entry installed: {outcome:?}");
 }
 
+#[tokio::test]
+async fn a_validation_that_offers_other_protocols_too_or_an_upper_case_name_is_answered() {
+    let harness = Harness::new("alpn", &["a.mirror.test"]).await;
+    let digest = Sha256::digest("token.thumbprint");
+    let certified = challenge_certificate("a.mirror.test", &digest).expect("certificate");
+    harness
+        .client
+        .challenges
+        .insert("a.mirror.test", Arc::new(certified));
+    for (name, protocols) in [
+        ("A.Mirror.Test", vec![b"acme-tls/1".to_vec()]),
+        (
+            "a.mirror.test",
+            vec![b"h2".to_vec(), b"acme-tls/1".to_vec()],
+        ),
+    ] {
+        let mut config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnything))
+            .with_no_client_auth();
+        config.alpn_protocols = protocols;
+        let socket = TcpStream::connect(harness.addr).await.expect("connect");
+        let server_name = ServerName::try_from(name.to_owned()).expect("name");
+        let tls = TlsConnector::from(Arc::new(config))
+            .connect(server_name, socket)
+            .await
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let (_, connection) = tls.get_ref();
+        assert_eq!(
+            connection.alpn_protocol(),
+            Some(&b"acme-tls/1"[..]),
+            "{name}"
+        );
+        let seen = &connection.peer_certificates().expect("certificate")[0];
+        assert_eq!(
+            check_challenge_certificate(seen, "a.mirror.test", "token.thumbprint"),
+            Ok(())
+        );
+    }
+}
+
 #[test]
 fn the_validator_rejects_the_challenge_certificates_it_should() {
     let digest = Sha256::digest("token.thumbprint");
