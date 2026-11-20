@@ -17,8 +17,8 @@ For a tag `v0.2.0` the release holds eleven files and `SHA256SUMS`:
 | File | What it is |
 | --- | --- |
 | `mirrust-linux-x86_64`, `mirrust-linux-aarch64`, `mirrust-macos-arm64`, `mirrust-macos-x86_64`, `mirrust-windows-x86_64.exe` | The bare binary, what a one-line `curl -o` download fetches. The Unix ones need `chmod +x`. |
-| `mirrust-v0.2.0-<target>.tar.gz` (four, Linux and macOS) | The same binary with `LICENSE`, `NOTICE`, `README.md` and `deploy/mirrust.service`, under a directory of the same name. |
-| `mirrust-v0.2.0-x86_64-pc-windows-msvc.zip` | `mirrust.exe` with `LICENSE`, `NOTICE` and `README.md`, under a directory of the same name. No `mirrust.service`: it is a systemd unit. |
+| `mirrust-v0.2.0-<target>.tar.gz` (four, Linux and macOS) | The same binary with `LICENSE`, `NOTICE`, `THIRD-PARTY-LICENSES.md`, `README.md` and `deploy/mirrust.service`, under a directory of the same name. |
+| `mirrust-v0.2.0-x86_64-pc-windows-msvc.zip` | `mirrust.exe` with `LICENSE`, `NOTICE`, `THIRD-PARTY-LICENSES.md` and `README.md`, under a directory of the same name. No `mirrust.service`: it is a systemd unit. |
 | `install.sh` | The installer, copied from the tagged commit by the `SHA256SUMS` job. `curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh \| sh` downloads the binary for the system, checks it against `SHA256SUMS` and installs it. Release 0.1.0 does not have it; the first release after it does. |
 | `SHA256SUMS` | The SHA-256 of the eleven files above, in the format of `sha256sum -c`. |
 
@@ -80,8 +80,21 @@ Notes:
    A version change also changes `Cargo.lock`. If `--locked` reports that the lock file needs
    an update, run `cargo check` once and commit the result: the release builds use `--locked`
    and fail on a stale lock file.
-3. **Commit and push to `main`, and wait for CI** (`ci.yml`) to pass.
-4. **Dry run** (first release, and after every change to `release.yml`):
+3. **Check the third-party licence file.** `THIRD-PARTY-LICENSES.md` holds the licence texts
+   of the crates linked into the binary, which the MIT, BSD, ISC and Apache-2.0 licences ask a
+   binary distribution to reproduce; the archives carry it. It is generated from `Cargo.lock`,
+   so after any change to the lock file, regenerate it and commit the result:
+
+   ```console
+   $ python3 .github/scripts/third-party-licenses.py > THIRD-PARTY-LICENSES.md
+   $ python3 .github/scripts/third-party-licenses.py --check
+   ```
+
+   `--check` exits non-zero when the file is stale. Nothing in CI runs it yet. The bare
+   binaries (`mirrust-linux-x86_64` and the others) cannot carry the file; the archives and the
+   repository do.
+4. **Commit and push to `main`, and wait for CI** (`ci.yml`) to pass.
+5. **Dry run** (first release, and after every change to `release.yml`):
 
    ```console
    $ gh workflow run release.yml -f publish=false
@@ -101,7 +114,7 @@ Notes:
 
    `release-files` holds all eleven files and `SHA256SUMS`; the five `dist-<target>` artifacts
    hold one target each.
-5. **Tag and push the tag:**
+6. **Tag and push the tag:**
 
    ```console
    $ git tag -a v0.2.0 -m "mirrust 0.2.0"
@@ -111,7 +124,7 @@ Notes:
    The tag name is `v` plus the version from step 1. A tag with a hyphen, such as
    `v0.2.0-rc.1`, becomes a pre-release (the version in Cargo.toml must then be
    `0.2.0-rc.1`).
-6. **Watch the run** (`gh run watch`), then open the release on GitHub and read the notes.
+7. **Watch the run** (`gh run watch`), then open the release on GitHub and read the notes.
    If you want to edit them, do it in the web page or with `gh release edit`.
 
 ### What the workflow does
