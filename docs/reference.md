@@ -345,8 +345,7 @@ FINGERPRINTS -----------------------------------------------------------------
              3:100;4:10485760;2:0|1048510465|0|m,s,a,p
 
 TLS --------------------------------------------------------------------------
-  Highest TLS version offered  TLS 1.3 (offers TLS 1.3, TLS 1.2, TLS 1.1, TLS
-                               1.0)
+  Highest TLS version offered  TLS 1.3 (also 1.2, 1.1, 1.0)
   Cipher suites                49
   Extensions                   7
   ALPN                         h2, http/1.1

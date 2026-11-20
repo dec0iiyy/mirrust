@@ -491,10 +491,17 @@ fn signals(tls: &TlsDetails) -> Vec<Signal> {
         .map(|version| (*version).to_owned())
         .or_else(|| version_name(tls.negotiated_version))
         .unwrap_or_else(|| "unknown".to_owned());
-    let offers = if versions.is_empty() {
-        "no supported_versions extension".to_owned()
+    let others: Vec<&str> = versions
+        .iter()
+        .skip(1)
+        .map(|version| version.strip_prefix("TLS ").unwrap_or(version))
+        .collect();
+    let value = if versions.is_empty() {
+        format!("{best} (no supported_versions extension)")
+    } else if others.is_empty() {
+        best.clone()
     } else {
-        format!("offers {}", versions.join(", "))
+        format!("{best} (also {})", others.join(", "))
     };
     out.push(Signal {
         label: "Highest TLS version offered",
@@ -503,7 +510,7 @@ fn signals(tls: &TlsDetails) -> Vec<Signal> {
         } else {
             Style::Yellow
         }),
-        value: clean(&format!("{best} ({offers})")),
+        value: clean(&value),
     });
 
     let real_ciphers: Vec<&str> = tls
@@ -777,7 +784,7 @@ mod tests {
             "             1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p",
             "",
             "TLS --------------------------------------------------------------------------",
-            "  Highest TLS version offered  TLS 1.3 (offers TLS 1.3, TLS 1.2)",
+            "  Highest TLS version offered  TLS 1.3 (also 1.2)",
             "  Cipher suites                3",
             "  Extensions                   6",
             "  ALPN                         h2, http/1.1",
