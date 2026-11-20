@@ -35,6 +35,11 @@ The workflow runs the tests on Linux and macOS, and also runs `cargo check --wor
 macOS with Rust 1.88.0 on 2026-11-20 (`rustup toolchain install 1.88.0 --profile minimal`,
 then `cargo +1.88.0 check ...`). Do not use language or library features newer than that.
 
+One test of the `server` crate runs the page's JavaScript in Node.js to compare it with the
+text report (see "The facts about the ClientHello are computed twice" in
+[docs/architecture.md](docs/architecture.md)). Without `node` on the `PATH` it is skipped and
+says so; CI has it and does not skip.
+
 The workspace lints are strict: `unsafe` code is forbidden, public items need documentation,
 and Clippy's `pedantic` group and `unwrap_used` are on. `-D warnings` turns every lint warning
 into an error.

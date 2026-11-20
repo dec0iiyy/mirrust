@@ -1017,4 +1017,152 @@ mod tests {
             ["TLS 1.3", "TLS 1.2", "TLS 1.0", "SSL 3.0", "0x7f1c"]
         );
     }
+
+    /// Runs the page's own `signals` function, from `static/index.html`, on `reports` in
+    /// Node.js and returns `(label, kind, value)` of each tile it draws, per report. `None`
+    /// when there is no `node` to run.
+    fn page_signals(reports: &[Value]) -> Option<Vec<Vec<(String, String, String)>>> {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        // The page's script up to the code that starts it, with just enough of a document
+        // for `el` to build its nodes.
+        const HARNESS: &str = r#"
+            const fs = require("fs");
+            const vm = require("vm");
+            const html = fs.readFileSync(process.argv[1], "utf8");
+            const start = html.indexOf("<script>");
+            const end = html.indexOf("if (embedded && typeof embedded");
+            if (start < 0 || end < start) throw new Error("the page's script was not found");
+            class Node {}
+            class Element extends Node {
+              constructor() { super(); this.children = []; this.className = ""; }
+              setAttribute() {}
+              append(...children) { this.children.push(...children); }
+            }
+            class Text extends Node {
+              constructor(data) { super(); this.data = data; }
+            }
+            const document = {
+              createElement: () => new Element(),
+              createTextNode: (data) => new Text(data),
+            };
+            const signals = vm.runInNewContext(
+              html.slice(start + "<script>".length, end) + "\n;signals;", { Node, document });
+            const text = (node) => node instanceof Element ? node.children.map(text).join("") : node.data;
+            const reports = JSON.parse(fs.readFileSync(0, "utf8"));
+            const tiles = reports.map((report) => signals(report).map((tile) => [
+              text(tile.children[0]),
+              tile.className.replace(/^signal/, "").trim(),
+              text(tile.children[1]),
+            ]));
+            process.stdout.write(JSON.stringify(tiles));
+        "#;
+        let page = concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html");
+        let mut node = match Command::new("node")
+            .args(["-e", HARNESS, page])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+        {
+            Ok(node) => node,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(error) => panic!("starting node: {error}"),
+        };
+        let input = serde_json::to_vec(reports).expect("JSON");
+        node.stdin
+            .take()
+            .expect("piped")
+            .write_all(&input)
+            .expect("write the reports");
+        let output = node.wait_with_output().expect("node ran");
+        assert!(output.status.success(), "node failed: {}", output.status);
+        Some(serde_json::from_slice(&output.stdout).expect("the tiles as JSON"))
+    }
+
+    /// The hellos of the corpus as reports, each once with TLS 1.2 negotiated and once
+    /// with no negotiated version, which is what a failed handshake leaves.
+    fn corpus_reports() -> Vec<Report> {
+        const HELLOS: &str = include_str!("../../../corpus/hellos.jsonl");
+        let mut reports = Vec::new();
+        for line in HELLOS.lines() {
+            let input: Value = serde_json::from_str(line).expect("corpus line is JSON");
+            let hex = input["hex"].as_str().expect("corpus hex");
+            let hello: Vec<u8> = (0..hex.len())
+                .step_by(2)
+                .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("corpus hex is valid"))
+                .collect();
+            for negotiated in [771, 0] {
+                reports.push(Report {
+                    http_version: "h2".into(),
+                    tls: Some(TlsDetails::new(
+                        &hello,
+                        negotiated,
+                        fingerprint::Transport::Tcp,
+                    )),
+                    ..Report::default()
+                });
+            }
+        }
+        reports.push(Report {
+            tls: Some(tls()),
+            ..Report::default()
+        });
+        reports
+    }
+
+    /// The facts of the text report's TLS block are computed a second time by the page, in
+    /// JavaScript. This runs both on every ClientHello of the corpus and compares them:
+    /// the tile's colour with the line's, and the tile's value with the start of the line's,
+    /// which has in brackets what the page puts in the tile's caption.
+    #[test]
+    fn the_page_states_the_same_facts_as_the_text_report() {
+        let reports = corpus_reports();
+        let json: Vec<Value> = reports.iter().map(Report::to_json).collect();
+        let Some(tiles) = page_signals(&json) else {
+            // GitHub's runners have Node.js; a machine without it skips the comparison.
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "node is not installed, and CI must not skip this test"
+            );
+            eprintln!("skipped: node is not installed");
+            return;
+        };
+        assert_eq!(tiles.len(), reports.len());
+        let labels = [
+            "Highest TLS version offered",
+            "Post-quantum key exchange",
+            "Encrypted ClientHello",
+            "Server name (SNI)",
+            "ALPN",
+            "Legacy cipher suites",
+            "GREASE",
+        ];
+        for (index, (report, tiles)) in reports.iter().zip(&tiles).enumerate() {
+            let tls = report.tls.as_ref().expect("a ClientHello");
+            let lines = signals(tls);
+            let on_page: Vec<&str> = tiles.iter().map(|(label, ..)| label.as_str()).collect();
+            assert_eq!(on_page, labels, "report {index}");
+            for (label, kind, value) in tiles {
+                let line = lines
+                    .iter()
+                    .find(|line| line.label == label)
+                    .unwrap_or_else(|| panic!("the text report has no line {label:?}"));
+                let tone = match line.tone {
+                    Some(Style::Green) => "good",
+                    Some(Style::Yellow) => "warn",
+                    Some(Style::Red) => "bad",
+                    _ => "",
+                };
+                let stated = line.value.split(" (").next().unwrap_or_default();
+                assert_eq!(
+                    (kind.as_str(), value.as_str()),
+                    (tone, stated),
+                    "report {index} ({}), {label}: the page against the text line {:?}",
+                    tls.ja4,
+                    line.value
+                );
+            }
+        }
+    }
 }

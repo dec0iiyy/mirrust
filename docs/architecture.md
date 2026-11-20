@@ -310,6 +310,17 @@ directly.
 - **Pages built into the binary.** The index and 404 pages are compiled in. The index page
   receives the report of the connection that loaded it, inlined as JSON; the encoder escapes
   `<`, `>` and `&`, so the report cannot close the `<script>` element it is placed in.
+- **The facts about the ClientHello are computed twice, and a test holds the two together.**
+  The text report's TLS block (`signals` in `crates/server/src/text.rs`) and the page's "At a
+  glance" tiles (`signals` in `crates/server/static/index.html`) read the same seven facts
+  from the report: the highest TLS version, post-quantum key exchange, Encrypted ClientHello,
+  the server name, ALPN, legacy cipher suites and GREASE. The page does it in JavaScript
+  because it also works from `/api/all` alone, and each side words its result for its own
+  medium, so neither is generated from the other. The test
+  `the_page_states_the_same_facts_as_the_text_report` runs the page's function in Node.js on
+  every ClientHello of `corpus/hellos.jsonl` and compares each tile's colour and value with
+  the text line. It needs `node` on the `PATH`: without it the test is skipped on a
+  developer's machine and fails in CI, whose runners have it.
 - **Response shape.** Known routes answer 200, unknown paths 404 with the built-in page, and a
   route that cannot answer 500 with `{"error": "..."}`. Real status codes let clients and
   monitoring tell the cases apart. HTTP/1 and HTTP/2 connections carry one request.
