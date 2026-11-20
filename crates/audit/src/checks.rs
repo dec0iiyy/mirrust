@@ -175,6 +175,11 @@ pub(crate) fn tls_traits(input: &Input<'_>) -> Option<Check> {
     }
     let agent = input.agent?;
     let engine = engine(agent)?;
+    // Only Apple's TLS stack is known to send GREASE. WebKitGTK (GnuTLS or OpenSSL) and the old
+    // Android browser also say `Safari/` and send none.
+    if engine == Engine::WebKit && user_agent_os(input.user_agent) != Some(Os::Darwin) {
+        return None;
+    }
     let family = agent.family.name();
     let hello = input.hello;
     let grease = hello.cipher_suites.iter().any(|&c| is_grease(c));
@@ -751,6 +756,22 @@ mod tests {
         let found = tls_traits(&Input::new(&hello, CHROME_UA)).expect("applies");
         assert_eq!(found.status, Status::Pass);
         assert!(tls_traits(&Input::new(&hello, "curl/8.7.1")).is_none());
+    }
+
+    #[test]
+    fn safari_traits_apply_to_apple_platforms_only() {
+        const IPHONE: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) \
+            AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+        // WebKitGTK and WPE claim `Version/60.5`, and their TLS comes from GnuTLS or OpenSSL.
+        const WEBKIT_GTK: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 \
+            (KHTML, like Gecko) Version/60.5 Safari/605.1.15";
+        let mut bare = ClientHello::default();
+        bare.cipher_suites = vec![0x1301, 0xc02f];
+        bare.alpn = vec![b"h2".to_vec()];
+        let found = tls_traits(&Input::new(&bare, IPHONE)).expect("applies");
+        assert_eq!(found.status, Status::Fail);
+        assert!(found.detail.contains("no GREASE"), "{}", found.detail);
+        assert!(tls_traits(&Input::new(&bare, WEBKIT_GTK)).is_none());
     }
 
     #[test]

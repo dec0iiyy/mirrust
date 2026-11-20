@@ -683,7 +683,7 @@ they are reported:
 | --- | --- | --- |
 | `tls_known` | The JA4 with the known-client dataset. A hello whose cipher and extension hashes equal an entry's, differing only in the first JA4 part (SNI, ALPN), counts as that client. | 5 for a cipher-list match only, 10 for no match |
 | `ua_tls` | The family the `User-Agent` names with the family of the matched client. Also reports a missing `User-Agent`. | 40; 25 when only the cipher list matched; 10 for no `User-Agent` |
-| `tls_traits` | Only without a dataset match and with a browser `User-Agent`: the extensions that engine always sends (Chromium: GREASE, `compress_certificate`, `application_settings` when `h2` is offered, no `record_size_limit`; Firefox: no GREASE, `record_size_limit`, `delegated_credentials`, no `application_settings`; Safari: GREASE, no `application_settings`). | 30 |
+| `tls_traits` | Only without a dataset match and with a browser `User-Agent`: the extensions that engine always sends (Chromium: GREASE, `compress_certificate`, `application_settings` when `h2` is offered, no `record_size_limit`; Firefox: no GREASE, `record_size_limit`, `delegated_credentials`, no `application_settings`; Safari on an Apple platform: GREASE, no `application_settings`; WebKitGTK also says Safari and is not checked). | 30 |
 | `ua_version` | The major version in the `User-Agent` with the first version of the matched entry. | 10 when the `User-Agent` is older |
 | `alps_alpn` | Every protocol named in `application_settings` (17513 or 17613) must also be in ALPN. | 30 |
 | `grease` | A hello that uses GREASE has it in cipher suites, extensions, groups and versions alike. | 20 |
