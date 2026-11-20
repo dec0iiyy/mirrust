@@ -10,8 +10,8 @@
 //! This module makes no network connections.
 
 use std::fmt::{self, Display};
-use std::fs;
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -658,7 +658,7 @@ fn execute(steps: &[Step], unit: &str) -> anyhow::Result<()> {
         match step {
             Step::CopyBinary { from } => copy_binary(from)?,
             Step::WriteUnit => {
-                atomic_replace(Path::new(UNIT_PATH), 0o644, |tmp| fs::write(tmp, unit))
+                atomic_replace(Path::new(UNIT_PATH), 0o644, &mut unit.as_bytes())
                     .with_context(|| format!("writing {UNIT_PATH}"))?;
             }
             Step::RemoveFile { path } => match fs::remove_file(path) {
@@ -704,23 +704,38 @@ fn copy_binary(from: &Path) -> anyhow::Result<()> {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    atomic_replace(to, 0o755, |tmp| fs::copy(from, tmp).map(|_| ()))
+    let mut running =
+        open_running_executable(from).with_context(|| format!("opening {}", from.display()))?;
+    atomic_replace(to, 0o755, &mut running)
         .with_context(|| format!("copying {} to {BINARY_PATH}", from.display()))
 }
 
-/// Replaces `to` without a moment in which it is missing or half written: `write` fills a
-/// temporary file next to it, which gets `mode` and is then renamed over `to`.
-fn atomic_replace(
-    to: &Path,
-    mode: u32,
-    write: impl FnOnce(&Path) -> io::Result<()>,
-) -> io::Result<()> {
-    let name = to
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    let tmp = to.with_file_name(format!(".{name}.tmp"));
-    let result = write(&tmp)
-        .and_then(|()| set_mode(&tmp, mode))
+/// Opens the program that is running, to copy it.
+///
+/// On Linux that is `/proc/self/exe`, which the kernel resolves to the file it is executing:
+/// the copy is this program even if the path it was started from has been given another file
+/// since. Elsewhere, and where `/proc` is not mounted, it is `path`.
+fn open_running_executable(path: &Path) -> io::Result<File> {
+    #[cfg(target_os = "linux")]
+    if let Ok(file) = File::open("/proc/self/exe") {
+        return Ok(file);
+    }
+    File::open(path)
+}
+
+/// Replaces `to` with `content` without a moment in which it is missing or half written: the
+/// content goes into a new file next to it, which gets `mode` and is then renamed over `to`.
+///
+/// This runs as root, so it must not write through anything another user could have put
+/// there. The temporary file is created with `O_EXCL`, which fails on an existing name and
+/// never follows a symbolic link; it is private until it is complete; its mode is set
+/// through the open file, not its name; and `rename` replaces `to` itself, also when `to` is
+/// a symbolic link.
+fn atomic_replace(to: &Path, mode: u32, content: &mut dyn Read) -> io::Result<()> {
+    let (tmp, mut file) = create_temporary(to)?;
+    let result = io::copy(content, &mut file)
+        .and_then(|_| set_mode(&file, mode))
+        .and_then(|()| file.sync_all())
         .and_then(|()| fs::rename(&tmp, to));
     if result.is_err() {
         // Best effort: the error that matters is the one returned.
@@ -729,16 +744,50 @@ fn atomic_replace(
     result
 }
 
+/// How many names [`create_temporary`] tries. Only files left by a run of this program that
+/// was killed, with this process id, can be in the way.
+const TEMPORARY_NAMES: u32 = 16;
+
+/// Creates a new, empty file next to `to` that only its owner can read or write.
+fn create_temporary(to: &Path) -> io::Result<(PathBuf, File)> {
+    let name = to
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let pid = std::process::id();
+    for attempt in 0..TEMPORARY_NAMES {
+        let tmp = to.with_file_name(format!(".{name}.{pid}.{attempt}.tmp"));
+        match options.open(&tmp) {
+            Ok(file) => return Ok((tmp, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "{TEMPORARY_NAMES} temporary names next to {} are taken",
+            to.display()
+        ),
+    ))
+}
+
 #[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+fn set_mode(file: &File, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+    file.set_permissions(fs::Permissions::from_mode(mode))
 }
 
 /// File modes mean nothing here, and a real run is refused before it gets this far.
 #[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
+fn set_mode(_file: &File, _mode: u32) -> io::Result<()> {
     Ok(())
 }
 
@@ -1237,29 +1286,61 @@ mod tests {
         assert!(START_SETTLE < Duration::from_secs(30));
     }
 
+    /// A reader that fails after it gave out `half`.
+    struct Failing(&'static [u8]);
+
+    impl Read for Failing {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.0.is_empty() {
+                return Err(io::Error::other("stop"));
+            }
+            let n = self.0.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.0[..n]);
+            self.0 = &self.0[n..];
+            Ok(n)
+        }
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "mirrust-install-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create the test directory");
+        dir
+    }
+
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .expect("list")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
     #[test]
     fn atomic_replace_swaps_the_file_and_leaves_no_temporary() {
-        let dir = std::env::temp_dir().join(format!("mirrust-install-test-{}", std::process::id()));
-        fs::create_dir_all(&dir).expect("create the test directory");
+        let dir = test_dir("swap");
         let target = dir.join("file");
         fs::write(&target, "old").expect("seed");
-        atomic_replace(&target, 0o644, |tmp| fs::write(tmp, "new")).expect("replace");
+        atomic_replace(&target, 0o644, &mut &b"new"[..]).expect("replace");
         assert_eq!(fs::read_to_string(&target).expect("read"), "new");
-        let failed = atomic_replace(&target, 0o644, |tmp| {
-            fs::write(tmp, "half")?;
-            Err(io::Error::other("stop"))
-        });
+        let failed = atomic_replace(&target, 0o644, &mut Failing(b"half"));
         assert!(failed.is_err());
         assert_eq!(
             fs::read_to_string(&target).expect("read"),
             "new",
             "the old file survives"
         );
-        let names: Vec<_> = fs::read_dir(&dir)
-            .expect("list")
-            .map(|entry| entry.expect("entry").file_name())
-            .collect();
-        assert_eq!(names, ["file"], "no temporary file is left");
+        assert_eq!(names_in(&dir), ["file"], "no temporary file is left");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1270,5 +1351,75 @@ mod tests {
             assert_eq!(mode & 0o777, 0o644);
         }
         fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_replace_does_not_write_through_a_planted_symbolic_link() {
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("symlink");
+        let victim = dir.join("victim");
+        fs::write(&victim, "precious").expect("seed");
+        let target = dir.join("file");
+        // What another user could prepare in a directory they can write to: the names the
+        // temporary file can have, each a link to a file that root can overwrite. The old
+        // fixed name `.file.tmp` is among them.
+        let pid = std::process::id();
+        symlink(&victim, dir.join(".file.tmp")).expect("link");
+        for attempt in 0..3 {
+            symlink(&victim, dir.join(format!(".file.{pid}.{attempt}.tmp"))).expect("link");
+        }
+        atomic_replace(&target, 0o755, &mut &b"binary"[..]).expect("replace");
+        assert_eq!(fs::read_to_string(&target).expect("read"), "binary");
+        assert_eq!(
+            fs::read_to_string(&victim).expect("read"),
+            "precious",
+            "nothing was written through a link"
+        );
+        assert!(
+            !fs::symlink_metadata(&target)
+                .expect("metadata")
+                .file_type()
+                .is_symlink()
+        );
+
+        // A target that is itself a link is replaced, not followed.
+        let linked = dir.join("linked");
+        symlink(&victim, &linked).expect("link");
+        atomic_replace(&linked, 0o644, &mut &b"unit"[..]).expect("replace");
+        assert_eq!(fs::read_to_string(&linked).expect("read"), "unit");
+        assert_eq!(fs::read_to_string(&victim).expect("read"), "precious");
+        fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_replace_gives_up_when_every_temporary_name_is_taken() {
+        let dir = test_dir("taken");
+        let target = dir.join("file");
+        let pid = std::process::id();
+        for attempt in 0..TEMPORARY_NAMES {
+            fs::write(dir.join(format!(".file.{pid}.{attempt}.tmp")), "").expect("seed");
+        }
+        let error = atomic_replace(&target, 0o644, &mut &b"new"[..]).expect_err("no name");
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(!target.exists());
+        fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn the_running_executable_can_be_opened_for_the_copy() {
+        let path = std::env::current_exe().expect("current_exe");
+        let mut copy = Vec::new();
+        open_running_executable(&path)
+            .expect("open")
+            .read_to_end(&mut copy)
+            .expect("read");
+        assert_eq!(
+            copy.len() as u64,
+            fs::metadata(&path).expect("metadata").len(),
+            "the whole test binary"
+        );
     }
 }

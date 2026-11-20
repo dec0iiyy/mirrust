@@ -74,7 +74,12 @@ init system) and when it is not run as root. Then, in this order:
 
 1. Copies the running executable to `/usr/local/bin/mirrust` with mode 0755: it writes a
    temporary file next to it and renames it over the target, so the file is never half
-   written. When the running executable already is that file, it does nothing.
+   written. When the running executable already is that file, it does nothing. On Linux the
+   copy is read from `/proc/self/exe`, the file the kernel is running, so it is this program
+   even if the path it was started from holds something else by then. The temporary file
+   (`.mirrust.<pid>.<n>.tmp`) is created exclusively: an existing file or symbolic link of
+   that name is never written through, the file is private until it is complete, and the
+   rename replaces the target itself even when that is a symbolic link.
 2. Writes `/etc/systemd/system/mirrust.service` (mode 0644, the same way). The text is
    [`deploy/mirrust.service`](../deploy/mirrust.service), built into the binary, with its
    `ExecStart=` block replaced by one for your flags, `LoadCredential=` lines added when you
