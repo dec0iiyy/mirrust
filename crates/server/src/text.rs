@@ -485,11 +485,23 @@ fn cipher_kind(name: &str) -> Option<CipherKind> {
     }
 }
 
+/// Orders the protocol names the extension details print, such as `TLS 1.3` or `SSL 3.0`, from
+/// oldest to newest; a name that is not a version (`0x7f1c`) ranks lowest.
+fn version_rank(name: &str) -> u32 {
+    let parse = |prefix: &str, base: u32| {
+        let (major, minor) = name.strip_prefix(prefix)?.split_once('.')?;
+        Some(base + major.parse::<u32>().ok()? * 10 + minor.parse::<u32>().ok()?)
+    };
+    parse("TLS ", 100).or_else(|| parse("SSL ", 0)).unwrap_or(0)
+}
+
 /// What stands out about the client's ClientHello; the "At a glance" panel of the page.
 fn signals(tls: &TlsDetails) -> Vec<Signal> {
     let mut out = Vec::new();
 
-    let versions = names(extension(tls, "supported_versions"), "versions");
+    // A client may list its versions in any order (some put the oldest first).
+    let mut versions = names(extension(tls, "supported_versions"), "versions");
+    versions.sort_by_key(|version| std::cmp::Reverse(version_rank(version)));
     let best = versions
         .first()
         .map(|version| (*version).to_owned())
@@ -994,5 +1006,15 @@ mod tests {
         assert_eq!(bare("X25519MLKEM768 (4588)"), "X25519MLKEM768");
         assert_eq!(bare("plain"), "plain");
         assert_eq!(bare("name (abc)"), "name (abc)");
+    }
+
+    #[test]
+    fn versions_are_ranked_whatever_order_the_client_lists_them() {
+        let mut listed = vec!["TLS 1.0", "TLS 1.3", "TLS 1.2", "SSL 3.0", "0x7f1c"];
+        listed.sort_by_key(|version| std::cmp::Reverse(version_rank(version)));
+        assert_eq!(
+            listed,
+            ["TLS 1.3", "TLS 1.2", "TLS 1.0", "SSL 3.0", "0x7f1c"]
+        );
     }
 }

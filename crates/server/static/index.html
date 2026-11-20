@@ -338,7 +338,9 @@ function signals(report) {
   const ciphers = tls.ciphers || [];
   const out = [];
 
-  const versions = (extension(tls, "supported_versions")?.versions || []).filter((v) => !isGrease(v));
+  // A client may list its versions in any order; rank them from newest to oldest.
+  const versionRank = (v) => { const m = /^(TLS|SSL) (\d+)\.(\d+)$/.exec(v); return m ? (m[1] === "TLS" ? 100 : 0) + m[2] * 10 + +m[3] : 0; };
+  const versions = (extension(tls, "supported_versions")?.versions || []).filter((v) => !isGrease(v)).sort((a, b) => versionRank(b) - versionRank(a));
   const best = versions[0] || TLS_VERSIONS[tls.tls_version_negotiated] || "unknown";
   out.push(signal(best === "TLS 1.3" ? "good" : "warn", "Highest TLS version offered", best,
     versions.length ? `Offers ${versions.join(", ")}` : "No supported_versions extension"));
