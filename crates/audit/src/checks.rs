@@ -10,6 +10,9 @@ const COMPRESS_CERTIFICATE: u16 = 27;
 const RECORD_SIZE_LIMIT: u16 = 28;
 const DELEGATED_CREDENTIALS: u16 = 34;
 const SUPPORTED_VERSIONS: u16 = 43;
+/// `quic_transport_parameters`, final and draft codepoint.
+const QUIC_TRANSPORT_PARAMETERS: u16 = 57;
+const QUIC_TRANSPORT_PARAMETERS_DRAFT: u16 = 0xffa5;
 /// `application_settings`, old and current codepoint.
 const ALPS: [u16; 2] = [17513, 17613];
 
@@ -175,13 +178,16 @@ pub(crate) fn tls_traits(input: &Input<'_>) -> Option<Check> {
     let family = agent.family.name();
     let hello = input.hello;
     let grease = hello.cipher_suites.iter().any(|&c| is_grease(c));
+    // Chrome sends no GREASE in the cipher suites of a QUIC ClientHello, and offers h3 only.
+    let quic = has_extension(hello, QUIC_TRANSPORT_PARAMETERS)
+        || has_extension(hello, QUIC_TRANSPORT_PARAMETERS_DRAFT);
     let alps = ALPS.iter().any(|&kind| has_extension(hello, kind));
     let offers_h2 = hello.alpn.iter().any(|name| name == b"h2");
 
     let mut wrong: Vec<&str> = Vec::new();
     match engine {
         Engine::Chromium => {
-            if !grease {
+            if !grease && !quic {
                 wrong.push("no GREASE values");
             }
             if !has_extension(hello, COMPRESS_CERTIFICATE) {
@@ -209,7 +215,7 @@ pub(crate) fn tls_traits(input: &Input<'_>) -> Option<Check> {
             }
         }
         Engine::WebKit => {
-            if !grease {
+            if !grease && !quic {
                 wrong.push("no GREASE values");
             }
             if alps {
@@ -732,6 +738,24 @@ mod tests {
         let found = tls_traits(&Input::new(&hello, CHROME_UA)).expect("applies");
         assert_eq!(found.status, Status::Pass);
         assert!(tls_traits(&Input::new(&hello, "curl/8.7.1")).is_none());
+    }
+
+    #[test]
+    fn a_quic_hello_without_grease_in_its_ciphers_is_not_a_mismatch() {
+        let mut quic = ClientHello::default();
+        quic.cipher_suites = vec![0x1301, 0x1302, 0x1303];
+        quic.alpn = vec![b"h3".to_vec()];
+        quic.extensions = vec![
+            extension(QUIC_TRANSPORT_PARAMETERS, &[]),
+            extension(COMPRESS_CERTIFICATE, &[]),
+        ];
+        let found = tls_traits(&Input::new(&quic, CHROME_UA)).expect("applies");
+        assert_eq!(found.status, Status::Pass, "{}", found.detail);
+
+        // The same hello with no QUIC extension is still missing its GREASE.
+        quic.extensions.remove(0);
+        let found = tls_traits(&Input::new(&quic, CHROME_UA)).expect("applies");
+        assert_eq!(found.status, Status::Fail);
     }
 
     #[test]

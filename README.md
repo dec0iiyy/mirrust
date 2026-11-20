@@ -25,7 +25,7 @@ missing browser headers behind it.
 | **A verdict, not just hashes** | An `audit` score from 0 to 100 compares the `User-Agent`, the TLS stack, the HTTP/2 settings and the request headers, and says which layer gives the client away. |
 | **Every layer on one port** | TLS over TCP and QUIC, HTTP/1.1, HTTP/2 and HTTP/3, all served from one address. |
 | **The fingerprints people use** | JA4 per the FoxIO specification (with `_o`, `_r` and `_ro`), JA3, PeetPrint and the Akamai HTTP/2 string, in the JSON layout of tls.peet.ws, plus an HTTP/3 fingerprint of its own. |
-| **Knows real clients** | A dataset of 30 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, rustls and okhttp. |
+| **Knows real clients** | A dataset of 31 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, rustls and okhttp. |
 | **Small and self-contained** | One binary of about 5 MB that idles at about 6 MB of memory. No database, no runtime to install. |
 | **Made for the open internet** | A connection limit, bounded memory per client, property-tested parsers, no `unsafe` code, and a JSON Lines request log. |
 
@@ -118,10 +118,11 @@ renewal, log rotation and Docker, follow [docs/deploy.md](docs/deploy.md).
 
 ## Status
 
-Version 0.1.0, tested on macOS: 194 tests, clippy and a release binary queried over HTTP/1.1 and
-HTTP/2. The Linux build, the systemd unit and the Docker image are written but not yet run on a
-server, and the server does not capture TCP SYN packets yet, so the TCP checks show as not
-measured. Details are in [Reference](docs/reference.md#status).
+Version 0.1.0. 218 tests, run on Ubuntu and macOS in CI. The release binary built in CI has run
+under the sandboxed systemd unit on an Ubuntu 24.04 server, on port 8443, and answered over
+HTTP/1.1, HTTP/2 and, with Chrome, HTTP/3. Not run yet: port 443, Let's Encrypt, log rotation
+and the Docker image. The server does not capture TCP SYN packets yet, so the TCP checks show as
+not measured. Details are in [Reference](docs/reference.md#status).
 
 ## License
 

@@ -4,10 +4,18 @@ This page sets up mirrust on a Debian or Ubuntu server (x86_64, systemd) as a sa
 service on TCP and UDP port 443, with a certificate from Let's Encrypt. `mirror.example.com`
 stands for your host name throughout.
 
-These steps have not been run on a Linux host yet. That covers the commands on this page, the
-systemd unit, the logrotate rules and the Docker image. The server itself has been run only on
-macOS. Check each step, and the output of `systemd-analyze verify` and `systemd-analyze
-security`, before you rely on it.
+What has been run, on an Ubuntu 24.04 server (x86_64, systemd 255): the release binary built
+by the `Linux build` workflow, under a copy of the unit below that listens on port 8443 with
+a self-signed certificate passed through `LoadCredential=`. `systemd-analyze verify` reported
+nothing for the unit and `systemd-analyze security` rated it 1.6, "OK". The service ran as a
+dynamic user, kept its request log in `/var/log/mirrust/`, answered over HTTP/1.1 and HTTP/2
+(curl) and HTTP/3 (Chrome), handled 300 requests with 20 at a time without an error or a
+restart (peak memory about 3.5 MB), logged failed connections, and stopped cleanly on
+`systemctl stop`.
+
+What has not been run: port 443 (so `CAP_NET_BIND_SERVICE` was not exercised), IPv6, the
+Let's Encrypt and firewall steps, the logrotate rules and the Docker image. Check those
+before you rely on them.
 
 You need:
 

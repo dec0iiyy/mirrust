@@ -4,8 +4,7 @@
 
 mirrust is a Cargo workspace (`crates/*`). It needs Rust 1.88 or later and a C compiler,
 which the `aws-lc-sys` dependency uses. The macOS build needed no CMake; `aws-lc-sys` can ask
-for it on a platform where it has no pregenerated bindings. The build has been run on macOS
-only so far.
+for it on a platform where it has no pregenerated bindings. CI builds on Ubuntu and macOS.
 
 ```console
 $ cargo build
@@ -20,8 +19,9 @@ describes the request flow and the design decisions, and
 
 ## The three checks
 
-The CI workflow (`.github/workflows/ci.yml`) is set up to run these on every push and pull
-request; it has not run yet. Run them before you send a change:
+The CI workflow (`.github/workflows/ci.yml`) runs these on every push and pull request, on
+Ubuntu and macOS, and builds with Rust 1.88, the declared minimum. Run them before you send a
+change:
 
 ```console
 $ cargo fmt --all --check

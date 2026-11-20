@@ -103,18 +103,20 @@ Not measured yet:
 - **The HTTP/3 request's pseudo-header order**, so the HTTP/3 fingerprint covers SETTINGS and
   stream types only. It is not in `/api/clean` or in the request log.
 
-Tested so far, on macOS only: `cargo build --release`, `cargo test --workspace` (193 tests,
-all passing), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all
---check` and `cargo doc --workspace --no-deps`, and a release binary queried with the system
-curl over HTTP/1.1 and HTTP/2. HTTP/3 is covered by the in-process tests in
-`crates/server/tests/h3.rs`; a curl with HTTP/3 support was not available for this check.
+Tested: `cargo test --workspace` (218 tests), clippy, `cargo fmt --all --check` and the build
+with Rust 1.88 in CI on Ubuntu and macOS, and on macOS `cargo doc --workspace --no-deps` and
+release binaries queried with curl and Chrome.
 
-Not yet run: a Linux build of the server, the CI workflow in `.github/workflows/ci.yml`
-(including the check with Rust 1.88, the declared minimum), the systemd unit, the logrotate
-rules and the Docker image in `deploy/`, and the Let's Encrypt steps in
-[deploy.md](deploy.md). Treat those instructions as written but unverified.
+Run on a server: on Ubuntu 24.04 (x86_64, systemd 255), the release binary built by the
+`Linux build` workflow ran under the sandboxed unit of `deploy/mirrust.service`, adapted to
+port 8443 and a self-signed certificate. It answered over HTTP/1.1, HTTP/2 (curl) and HTTP/3
+(Chrome), served 300 requests at 20 in parallel without an error, peaked at about 3.5 MB of
+memory, and stopped cleanly. See [deploy.md](deploy.md) for the details.
 
-The dataset behind the `client` field has 30 entries, so a real client often gets `ciphers`
+Not run yet: port 443, IPv6, the Let's Encrypt and firewall steps, the logrotate rules and the
+Docker image in `deploy/`. Treat those instructions as written but unverified.
+
+The dataset behind the `client` field has 31 entries, so a real client often gets `ciphers`
 or `none`; see [docs/fingerprints.md](fingerprints.md#12-known-clients-client).
 
 ## Command line
@@ -502,14 +504,14 @@ $ git diff corpus/
 ```
 
 `corpus/clients.jsonl` is not a snapshot but the known-client dataset behind the `client` field:
-30 entries, 20 from the browser profiles of `hellos.jsonl` and 10 captured from clients through
+31 entries, 20 from the browser profiles of `hellos.jsonl` and 11 captured from clients through
 the server. Tests check that it parses, that its JA4s are unique and are the hashes of their
 `ja4_r`, and that every profile of `hellos.jsonl` with SNI is in it.
 
 Other tests cover the JA4 worked example from the FoxIO specification, the RFC 9001 Appendix A
 QUIC Initial, a recorded Chrome QUIC Initial split over two datagrams, and the server end to end
 over HTTP/1.1, HTTP/2 and HTTP/3 with an in-process client, including the connection limit,
-the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 193 tests.
+the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 218 tests.
 
 ## Compatibility with tls.peet.ws
 
