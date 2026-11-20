@@ -1,5 +1,11 @@
-# The image is built from the workspace manifest, the lock file and the crates only.
+# The image is built from the workspace manifest, the lock file and the crates, plus the one
+# corpus file the fingerprint crate compiles in (crates/fingerprint/src/known.rs). The tests'
+# corpus files are not needed to build the binary. If non-test code gains another
+# include_str! outside crates/, add its file here, or the Docker build fails.
 *
 !Cargo.toml
 !Cargo.lock
 !crates
+!corpus/clients.jsonl
+# Build output inside a crate directory, if a build was run in place.
+**/target

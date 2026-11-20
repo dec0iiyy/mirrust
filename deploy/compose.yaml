@@ -1,0 +1,42 @@
+# One mirrust server. Start it from this directory: docker compose up -d. See docs/docker.md.
+# Not run yet: it has been checked by reading only.
+name: mirrust # Project name: prefixes the volume and network names.
+
+services:
+  mirrust:
+    # Build from the repository root; to run the published image instead, replace "build" with "image: ghcr.io/dec0iiyy/mirrust:<version>".
+    build:
+      context: .. # The repository root, one level above this file.
+      dockerfile: deploy/Dockerfile # The Dockerfile, relative to the context.
+    image: mirrust:local # Name given to the image built above.
+    restart: unless-stopped # Start with Docker and after a crash; not after docker compose stop.
+    ports:
+      - "443:443/tcp" # HTTP/1.1 and HTTP/2. Keep both host ports equal to the container's 443: Alt-Svc names the port the server listens on.
+      - "443:443/udp" # HTTP/3 on the same port number as TCP.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0 # Lets the non-root user bind 443 without any capability; Docker sets it by default, this does not rely on that.
+    cap_drop:
+      - ALL # No Linux capabilities at all; none is needed once the sysctl above is set.
+    security_opt:
+      - no-new-privileges:true # The process cannot gain privileges through setuid binaries; the image has none.
+    read_only: true # Root file system is read-only; the only writable place is the volume below.
+    mem_limit: 512m # Memory cap (a guess, not measured); the container is killed above it.
+    pids_limit: 512 # Cap on processes and threads, against a runaway thread count.
+    volumes:
+      - mirrust-data:/data # State directory, owned by the image's user (UID 10001): the request log now, the certificate cache later.
+      # - ./certs:/certs:ro # Certificate and key for the --cert and --key lines of command, read-only.
+    command:
+      - --listen # Address to listen on, TCP and UDP.
+      - 0.0.0.0:443 # All interfaces inside the container; the port stays 443.
+      - --log # Request log, one JSON line per request and per failed TLS handshake.
+      - /data/requests.jsonl # The log file in the volume; the image has no shell, so read it as docs/docker.md describes.
+      # Without the next four lines the server uses a self-signed certificate for localhost. For a real
+      # host name, put fullchain.pem and privkey.pem for it (for example mirror.example.com) into ./certs
+      # next to this file, readable by UID 10001, and remove the leading "# " from these lines and from ./certs above.
+      # - --cert # PEM certificate chain.
+      # - /certs/fullchain.pem # Replace with the file for your host name.
+      # - --key # PEM private key.
+      # - /certs/privkey.pem # Replace with the file for your host name.
+
+volumes:
+  mirrust-data: {} # The named volume for /data; docker compose down keeps it, down -v deletes it.
