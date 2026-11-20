@@ -187,38 +187,33 @@ To insist on this workflow and not any workflow of the repository, add
 archives. The action is `actions/attest-build-provenance` v4, pinned by commit in the
 workflow, which since version 4 is a thin wrapper around `actions/attest`.
 
+## What has been exercised
+
+Release 0.1.0 was published by this workflow on 2026-11-20, after a dry run
+(`publish=false`) that built and smoke-tested every target. On GitHub's runners:
+
+- All five builds, including both musl builds (`musl-tools` with `CC_<target>=musl-gcc`) and the
+  Windows build with `AWS_LC_SYS_PREBUILT_NASM=1`, and the Linux "binary is static" check.
+- The smoke tests: the Linux binaries in clean `debian:12-slim` and `alpine:3` containers, the
+  macOS binaries on the runner (the x86_64 one included) and `mirrust.exe` on the Windows
+  runner. On Windows, `curl.exe` negotiated HTTP/1.1, so that smoke test accepts HTTP/1.1 or
+  HTTP/2.
+- The version check, the packaging, `SHA256SUMS` over ten files, `gh release create` and the
+  build provenance attestation.
+
+By hand, from the published release: the one-line download of `mirrust-macos-arm64` from
+`releases/latest/download/`, `shasum -a 256 -c` against `SHA256SUMS`, `gh attestation verify
+mirrust --repo dec0iiyy/mirrust` (exit code 0), and `mirrust --help` from the downloaded file.
+`SHA256SUMS` itself carries no attestation, only the files it lists do.
+
 ## What has not been exercised
 
-No release has been published and the workflow has never run on GitHub. What was checked:
-
-- `actionlint` accepts the workflow.
-- The shell of the version check, the packaging step and the release step, and the POSIX
-  smoke test script `smoke-test.sh`, were run locally on macOS (Apple silicon) against a real release build of
-  `aarch64-apple-darwin`; the `x86_64-apple-darwin` binary was cross-compiled on the same
-  machine (it builds; it could not be run there, because Rosetta 2 is not installed on that
-  machine). The tag check was run for the passing and failing combinations; `gh` was replaced
-  by a stub that printed its arguments.
-
-What was not, and is the reason for the dry run:
-
-- **Both musl builds.** `musl-tools`, `CC_<target>=musl-gcc` and `aws-lc-sys` have not been
-  run together, on x86_64 or on arm64. This is the most likely step to fail. The Linux
-  binaries have therefore not run in the Debian and Alpine containers either, and the
-  "binary is static" check has not seen a real binary. Docker is not installed on the machine
-  where the workflow was written.
-- **The whole Windows job.** Nothing of it has run: the build with
-  `AWS_LC_SYS_PREBUILT_NASM=1` was not tried here (`ci.yml` runs the tests with it), the
-  PowerShell smoke test `smoke-test.ps1` was written without a PowerShell to run it, and the
-  7-Zip packaging step and the bash default shell of the Windows runner are assumptions
-  from the runner image's documentation. `mirrust.exe` has not run on Windows at all.
-- A musl build of mirrust has not run under `deploy/mirrust.service` (the sandbox, and
-  `SystemCallFilter=@system-service` in particular) or on a real server. The binary that the
-  README says has been run under the unit was built for glibc on Ubuntu 24.04.
-- The runners themselves: `ubuntu-24.04-arm` (free for public repositories), `macos-latest`
-  (the x86_64 smoke test needs Rosetta 2 there), and the tools the steps assume on them
-  (`jq`, `readelf`, `docker`, `gh`).
-- The GNU `tar` flags of the Linux packaging step (the macOS `bsdtar` flags were run).
-- `actions/attest-build-provenance` and `gh release create` with real credentials: the
-  action's inputs were read from its `action.yml` and README at the pinned commit; the
-  attestation was never made, and `gh attestation verify` has never been run against one.
-- The one-line downloads in the release notes and in this page.
+- A musl build of mirrust under `deploy/mirrust.service` (the sandbox, and
+  `SystemCallFilter=@system-service` in particular) or on a real server. The binary that
+  the docs say has been run under the unit was built for glibc on Ubuntu 24.04.
+- The Linux and Windows binaries on real machines other than the CI runners and containers
+  above; the Windows binary has only run its smoke test on the runner.
+- The macOS binaries after a browser download: they are not signed or notarised, so
+  Gatekeeper may stop them (see the macOS note above).
+- The one-line downloads for the other platforms, and the checksum and attestation checks for
+  files other than `mirrust-macos-arm64`.
