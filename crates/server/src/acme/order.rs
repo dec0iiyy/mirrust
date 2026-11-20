@@ -11,7 +11,7 @@ use instant_acme::{
 };
 use rustls::sign::CertifiedKey;
 
-use crate::acme::cache::{CertCache, CertificateAuthority, StoredCert};
+use crate::acme::cache::{CertCache, CertificateAuthority, Failures, StoredCert};
 use crate::acme::cert::{CurrentCert, Validity, certified_key, validity_of};
 use crate::acme::challenge::{AcmeChallenges, challenge_certificate};
 
@@ -29,6 +29,12 @@ const FIRST_RETRY: Duration = Duration::from_secs(5 * 60);
 
 /// The longest wait between attempts.
 const LONGEST_RETRY: Duration = Duration::from_secs(6 * 3600);
+
+/// The least time between a success and the next order, whatever the certificate's dates say.
+/// A host clock far ahead of the CA's makes a fresh certificate look due at once; without
+/// this, the server would order again and again and use up Let's Encrypt's limit of five
+/// certificates per week for the same names.
+const MIN_RENEWAL_GAP: Duration = Duration::from_secs(3600);
 
 /// The longest single sleep. A long wait is cut into pieces and the wall clock is read after
 /// each, because timers do not run while the machine is suspended.
@@ -62,6 +68,8 @@ pub fn start(
         cache,
         certs,
         challenges,
+        #[cfg(test)]
+        http: None,
     };
     eprintln!(
         "acme: --domain means you accept the Let's Encrypt Subscriber Agreement, \
@@ -86,7 +94,8 @@ pub fn start(
         );
         (SystemTime::now(), true)
     };
-    client.run(renew_at, announced)
+    let (renew_at, retry) = client.resume_after_failures(renew_at);
+    client.run(renew_at, announced, retry)
 }
 
 struct Client {
@@ -94,11 +103,41 @@ struct Client {
     cache: CertCache,
     certs: Arc<CurrentCert>,
     challenges: AcmeChallenges,
+    /// Tests give the account an in-process CA instead of the network.
+    #[cfg(test)]
+    http: Option<fake_ca::HttpFactory>,
 }
 
 impl Client {
     fn names_text(&self) -> String {
         self.settings.names.join(", ")
+    }
+
+    /// Takes the failed attempts of earlier runs into account: the next attempt is not before
+    /// the wait that followed the last one, so restarting does not retry at once. Returns the
+    /// time of the next attempt and the backoff to continue with.
+    fn resume_after_failures(&self, renew_at: SystemTime) -> (SystemTime, Backoff) {
+        let mut retry = Backoff::new(FIRST_RETRY, LONGEST_RETRY);
+        let failures = match self.cache.failures(&self.settings.names) {
+            Ok(failures) => failures,
+            Err(error) => {
+                eprintln!("acme: cannot read the record of failed attempts: {error}");
+                None
+            }
+        };
+        let Some(failures) = failures else {
+            return (renew_at, retry);
+        };
+        let now = SystemTime::now();
+        let renew_at = retry.resume(failures, renew_at, now);
+        if let Ok(wait) = renew_at.duration_since(now) {
+            eprintln!(
+                "acme: the last {} attempts failed; the next one is in {}",
+                failures.count,
+                describe(wait)
+            );
+        }
+        (renew_at, retry)
     }
 
     /// Installs the cached certificate if it is for these names and still valid.
@@ -131,8 +170,7 @@ impl Client {
     }
 
     /// Orders at `renew_at`, then at each renewal time, backing off after a failure.
-    async fn run(self, mut renew_at: SystemTime, mut announced: bool) {
-        let mut retry = Backoff::new(FIRST_RETRY, LONGEST_RETRY);
+    async fn run(self, mut renew_at: SystemTime, mut announced: bool, mut retry: Backoff) {
         loop {
             sleep_until(renew_at).await;
             let renewing = self.certs.is_set();
@@ -155,7 +193,10 @@ impl Client {
                         describe(validity.renew_at().duration_since(now).unwrap_or_default()),
                     );
                     retry.reset();
-                    renew_at = validity.renew_at();
+                    if let Err(error) = self.cache.clear_failures() {
+                        eprintln!("acme: cannot remove the record of failed attempts: {error}");
+                    }
+                    renew_at = validity.renew_at().max(now + MIN_RENEWAL_GAP);
                 }
                 Err(error) => {
                     let wait = retry.next_wait();
@@ -163,7 +204,19 @@ impl Client {
                         "acme: failed: {error:#}; next attempt in {}",
                         describe(wait)
                     );
-                    renew_at = SystemTime::now() + wait;
+                    let now = SystemTime::now();
+                    renew_at = now + wait;
+                    let failures = Failures {
+                        count: retry.failures(),
+                        at: now,
+                    };
+                    if let Err(error) = self.cache.save_failures(&self.settings.names, failures) {
+                        eprintln!(
+                            "acme: cannot record the failure in {} (a restart tries again at \
+                             once): {error}",
+                            self.cache.dir().display()
+                        );
+                    }
                 }
             }
         }
@@ -192,7 +245,13 @@ impl Client {
 
     /// The account: restored from the cache, or created and saved.
     async fn account(&self) -> anyhow::Result<Account> {
-        let http = || Account::builder().context("setting up the HTTPS client");
+        let http = || {
+            #[cfg(test)]
+            if let Some(factory) = &self.http {
+                return Ok(Account::builder_with_http(factory()));
+            }
+            Account::builder().context("setting up the HTTPS client")
+        };
         let saved = self.cache.account().context("reading the saved account")?;
         if let Some(json) = saved {
             match serde_json::from_str::<AccountCredentials>(&json) {
@@ -355,7 +414,7 @@ impl Drop for Armed<'_> {
 struct Backoff {
     first: Duration,
     longest: Duration,
-    next: Duration,
+    failures: u32,
 }
 
 impl Backoff {
@@ -363,18 +422,39 @@ impl Backoff {
         Self {
             first,
             longest,
-            next: first,
+            failures: 0,
         }
     }
 
+    /// The wait that follows the `failures`-th failure in a row.
+    fn wait_after(&self, failures: u32) -> Duration {
+        let doublings = failures.saturating_sub(1).min(32);
+        self.first
+            .saturating_mul(2u32.saturating_pow(doublings))
+            .min(self.longest)
+    }
+
+    /// Counts one more failure and returns the wait that follows it.
     fn next_wait(&mut self) -> Duration {
-        let wait = self.next;
-        self.next = (wait * 2).min(self.longest);
-        wait
+        self.failures = self.failures.saturating_add(1);
+        self.wait_after(self.failures)
+    }
+
+    /// How many failures in a row have been counted.
+    fn failures(&self) -> u32 {
+        self.failures
     }
 
     fn reset(&mut self) {
-        self.next = self.first;
+        self.failures = 0;
+    }
+
+    /// Continues from `earlier` failures: counts them, and returns `renew_at` or, if that is
+    /// later, the time their wait ends. A failure dated after `now` (the clock was set back)
+    /// counts as having happened now.
+    fn resume(&mut self, earlier: Failures, renew_at: SystemTime, now: SystemTime) -> SystemTime {
+        self.failures = earlier.count;
+        renew_at.max(earlier.at.min(now) + self.wait_after(earlier.count))
     }
 }
 
@@ -398,6 +478,9 @@ fn describe(span: Duration) -> String {
 }
 
 #[cfg(test)]
+mod fake_ca;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -417,6 +500,34 @@ mod tests {
             let wait = retry.next_wait();
             assert!(wait >= FIRST_RETRY && wait <= LONGEST_RETRY, "{wait:?}");
         }
+    }
+
+    #[test]
+    fn a_restart_waits_out_the_backoff_of_the_failures_before_it() {
+        let mut retry = Backoff::new(Duration::from_secs(60), Duration::from_secs(300));
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let earlier = Failures { count: 3, at };
+        // The third failure was followed by a wait of 240 s.
+        let now = at + Duration::from_secs(10);
+        assert_eq!(
+            retry.resume(earlier, now, now),
+            at + Duration::from_secs(240)
+        );
+        // It goes on from the third failure: the next wait is the fourth, 300 s.
+        assert_eq!(retry.next_wait().as_secs(), 300);
+        assert_eq!(retry.failures(), 4);
+        // A certificate that is due later is not made due sooner.
+        let later = at + Duration::from_secs(5000);
+        assert_eq!(retry.resume(earlier, later, now), later);
+        // A failure dated in the future (clock set back) counts from now.
+        let future = Failures {
+            count: 1,
+            at: now + Duration::from_secs(9999),
+        };
+        assert_eq!(
+            retry.resume(future, now, now),
+            now + Duration::from_secs(60)
+        );
     }
 
     #[test]
@@ -473,6 +584,7 @@ mod tests {
             cache,
             certs: Arc::new(CurrentCert::new()),
             challenges: AcmeChallenges::new(),
+            http: None,
         };
         (client, base)
     }

@@ -202,14 +202,16 @@ warning.
 - It prints the notice about the Subscriber Agreement once, and then one `acme:` line on
   stderr per event: obtaining or using the cached certificate, ordering, issued or renewed with
   the days of validity left, and failed with the CA's error text and the wait before the next
-  attempt. After a failure it waits 5 minutes, then twice as long each time up to 6 hours. A
-  certificate is renewed 30 days before it ends, or a third of its lifetime before it ends if
-  that is shorter.
+  attempt. After a failure it waits 5 minutes, then twice as long each time up to 6 hours; the
+  count and time of the failures are kept in `last-failure.txt` in the cache, so a restart does
+  not start the waits over. A certificate is renewed 30 days before it ends, or a third of its lifetime before it ends if
+  that is shorter, but never sooner than an hour after the last order, so a host clock that is far off
+  cannot make it order in a loop.
 - A connection whose ClientHello offers ALPN `acme-tls/1` is the CA validating a name. It gets
   the challenge certificate, takes a connection slot like any connection, and is not written to
   the request log and not counted in the failure summary.
 - `--acme-dir` and every directory it creates have mode 0700 on Unix, and the files in it
-  (`account.json`, `private-key.pem`, `certificate.pem`, `names.txt`, in a subdirectory
+  (`account.json`, `private-key.pem`, `certificate.pem`, `names.txt`, `last-failure.txt`, in a subdirectory
   `letsencrypt` or `letsencrypt-staging`) mode 0600. Key material is never printed.
 - `--domain auto` finds the local address of the default route without sending a packet, and
   refuses to start if it is loopback, private (RFC 1918), link-local, in `100.64.0.0/10` or

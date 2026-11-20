@@ -264,7 +264,10 @@ acme: failed: creating the ACME account: client error (Connect): tcp connect err
 ```
 
 The waits are 5 minutes, then twice as long after each failure, at most 6 hours, and start
-again after a success. While a renewal fails, the old certificate stays in use. An attempt that
+again after a success. They survive a restart: the failures are recorded in `last-failure.txt`
+in the cache, and a restart waits out the rest of the wait instead of ordering at once, so
+restarting while you fix DNS or the firewall does not use up Let's Encrypt's limit of five
+failed validations per name and hour (delete the file to try at once). While a renewal fails, the old certificate stays in use. An attempt that
 takes longer than 10 minutes counts as failed.
 
 **Try it first with `--acme-staging`.** The staging CA has far higher rate limits, so a
@@ -285,12 +288,28 @@ refuses to start and asks for an explicit `--domain`. That is also what happens 
 server whose public address is a NAT mapping of a private one, so give such a server its name.
 `auto` stands for the whole certificate and cannot be combined with other names.
 
+sslip.io is not on the Public Suffix List (checked in the list of 2026-11-20), so Let's Encrypt
+counts every `A-B-C-D.sslip.io` name as one registered domain with all other users of the
+service, and its limit of 50 certificates per registered domain per week is shared by them. The
+sslip.io operators say Let's Encrypt has raised their limit (to 250,000 a week, <https://nip.io>),
+but an order can still be refused for that reason; the error text then names the rate limit.
+For a server you keep, use a name of your own.
+
 **The cache.** `--acme-dir` is created with mode 0700 if it does not exist, and holds, in a
 subdirectory per CA, `account.json` (the ACME account key), `private-key.pem`,
-`certificate.pem` and `names.txt`, all with mode 0600. Keep it private, and keep it across
+`certificate.pem`, `names.txt` and, after a failed attempt, `last-failure.txt`, all with mode
+0600. Keep it private, and keep it across
 restarts: a restart that finds a valid certificate for the same names does not ask Let's
 Encrypt again. A cached certificate for other names, or one that has expired, is ignored. A
 directory that already exists is used as it is, so check its mode.
+
+**IPv6.** If the name has an `AAAA` record, Let's Encrypt connects over IPv6 first and, if
+connecting or the TLS handshake over IPv6 fails, tries IPv4 (`va/tlsalpn.go` in Boulder, the Let's Encrypt
+software). So a server that listens on IPv4 only (`--listen 0.0.0.0:443`) still validates when
+the `AAAA` address does not answer or refuses the connection. It fails when the `AAAA` address
+is another machine that does answer on port 443 (a stale record, a CDN), because there is no
+retry after a handshake that succeeded: fix or remove that record, or listen on `[::]:443`
+(see [Listening address](#listening-address)) when the `AAAA` address is this server's.
 
 **Port.** Let's Encrypt validates on TCP port 443 only. If you give `--listen` another port,
 mirrust still starts but prints a warning, and issuance fails unless something forwards TCP 443

@@ -3,6 +3,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 
@@ -10,6 +11,7 @@ const ACCOUNT_FILE: &str = "account.json";
 const CHAIN_FILE: &str = "certificate.pem";
 const KEY_FILE: &str = "private-key.pem";
 const NAMES_FILE: &str = "names.txt";
+const FAILURE_FILE: &str = "last-failure.txt";
 
 /// Mode of the cache directories: only the owner.
 #[cfg(unix)]
@@ -56,6 +58,17 @@ impl CertificateAuthority {
             Self::LetsEncryptStaging => "https://acme-staging-v02.api.letsencrypt.org/directory",
         }
     }
+}
+
+/// The failed attempts in a row to get a certificate for some names, and when the last one
+/// ended. It is kept on disk so that a restart does not start the waits over: Let's Encrypt
+/// allows five failed validations per name and hour, and a restart loop would use them up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Failures {
+    /// How many attempts in a row failed.
+    pub count: u32,
+    /// When the last one failed.
+    pub at: SystemTime,
 }
 
 /// A certificate chain and its private key as PEM text.
@@ -137,17 +150,76 @@ impl CertCache {
     }
 
     /// Saves the certificate issued for `names`. The key file is readable by the owner only.
-    /// The names go last, so a crash in between leaves a cache that is ignored, not a
-    /// mismatched one.
+    /// The names file of the previous certificate is removed first and written last, so a
+    /// crash in between leaves a cache that is ignored, not a new key next to an old chain.
     ///
     /// # Errors
     ///
     /// Fails when a file cannot be written.
     pub fn save_certificate(&self, names: &[String], cert: &StoredCert) -> io::Result<()> {
+        match fs::remove_file(self.dir.join(NAMES_FILE)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
         write_private(&self.dir.join(KEY_FILE), &cert.key_pem)?;
         write_private(&self.dir.join(CHAIN_FILE), &cert.chain_pem)?;
         write_private(&self.dir.join(NAMES_FILE), &names_text(names))
     }
+}
+
+impl CertCache {
+    /// The failed attempts recorded for exactly `names`, if any; a record for other names is
+    /// not returned. An unreadable record counts as none.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file exists but cannot be read.
+    pub fn failures(&self, names: &[String]) -> io::Result<Option<Failures>> {
+        let Some(text) = read_optional(&self.dir.join(FAILURE_FILE))? else {
+            return Ok(None);
+        };
+        Ok(parse_failures(&text, names))
+    }
+
+    /// Records that `failures.count` attempts in a row for `names` have failed.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file cannot be written.
+    pub fn save_failures(&self, names: &[String], failures: Failures) -> io::Result<()> {
+        let seconds = failures
+            .at
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let text = format!("{} {seconds}\n{}", failures.count, names_text(names));
+        write_private(&self.dir.join(FAILURE_FILE), &text)
+    }
+
+    /// Forgets the recorded failures, after a success.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file exists but cannot be removed.
+    pub fn clear_failures(&self) -> io::Result<()> {
+        match fs::remove_file(self.dir.join(FAILURE_FILE)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Reads what [`CertCache::save_failures`] wrote: `count seconds`, then the names.
+fn parse_failures(text: &str, names: &[String]) -> Option<Failures> {
+    let (first, saved_names) = text.split_once('\n')?;
+    let (count, seconds) = first.split_once(' ')?;
+    if saved_names != names_text(names) {
+        return None;
+    }
+    Some(Failures {
+        count: count.parse().ok().filter(|&count| count > 0)?,
+        at: UNIX_EPOCH + Duration::from_secs(seconds.parse().ok()?),
+    })
 }
 
 /// The names, sorted, one per line.
@@ -192,7 +264,20 @@ fn write_private(path: &Path, text: &str) -> io::Result<()> {
     let mut file = create_private_file(&temporary)?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
-    fs::rename(&temporary, path)
+    fs::rename(&temporary, path)?;
+    sync_parent(path)
+}
+
+/// Flushes the directory of `path`, so that a rename in it survives a crash. Not possible on
+/// Windows, where opening a directory fails.
+fn sync_parent(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        File::open(dir)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn create_private_file(path: &Path) -> io::Result<File> {
@@ -259,6 +344,58 @@ mod tests {
                 .expect("read")
                 .is_none()
         );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_save_that_fails_midway_leaves_no_names_so_the_old_files_are_ignored() {
+        let base = temp_base("midway");
+        let cache = CertCache::open(&base, CertificateAuthority::LetsEncrypt).expect("open");
+        let list = names(&["a.example.com"]);
+        let old = StoredCert {
+            chain_pem: "OLD CHAIN".into(),
+            key_pem: "OLD KEY".into(),
+        };
+        cache.save_certificate(&list, &old).expect("save");
+        // Writing the chain fails: a directory is in the way of the rename.
+        fs::remove_file(cache.dir().join(CHAIN_FILE)).expect("remove");
+        fs::create_dir(cache.dir().join(CHAIN_FILE)).expect("block");
+        let new = StoredCert {
+            chain_pem: "NEW CHAIN".into(),
+            key_pem: "NEW KEY".into(),
+        };
+        cache.save_certificate(&list, &new).expect_err("blocked");
+        assert!(
+            cache.certificate(&list).expect("read").is_none(),
+            "a new key next to an old chain must not be served"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn failures_are_kept_for_the_same_names_only_and_can_be_cleared() {
+        let base = temp_base("failures");
+        let cache = CertCache::open(&base, CertificateAuthority::LetsEncrypt).expect("open");
+        let list = names(&["b.example.com", "a.example.com"]);
+        assert_eq!(cache.failures(&list).expect("read"), None);
+
+        let failures = Failures {
+            count: 3,
+            at: UNIX_EPOCH + Duration::from_secs(1_800_000_000),
+        };
+        cache.save_failures(&list, failures).expect("save");
+        let reordered = names(&["a.example.com", "b.example.com"]);
+        assert_eq!(cache.failures(&reordered).expect("read"), Some(failures));
+        let other = names(&["a.example.com"]);
+        assert_eq!(cache.failures(&other).expect("read"), None, "other names");
+
+        cache.save_failures(&list, failures).expect("save again");
+        cache.clear_failures().expect("clear");
+        cache.clear_failures().expect("clearing twice is fine");
+        assert_eq!(cache.failures(&list).expect("read"), None);
+
+        fs::write(cache.dir().join(FAILURE_FILE), "garbage").expect("write");
+        assert_eq!(cache.failures(&list).expect("read"), None, "unreadable");
         let _ = fs::remove_dir_all(&base);
     }
 

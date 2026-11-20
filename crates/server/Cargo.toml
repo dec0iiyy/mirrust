@@ -32,9 +32,15 @@ tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-mu
 tokio-rustls.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 h2.workspace = true
 http.workspace = true
+http-body = "1"
 proptest.workspace = true
+# Reads the CSR and the challenge certificate in the fake CA of `acme/order/fake_ca.rs`.
+rcgen = { workspace = true, features = ["x509-parser"] }
+sha2.workspace = true
+x509-parser = "0.18"
 
 [lints]
 workspace = true

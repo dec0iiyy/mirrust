@@ -60,7 +60,8 @@ impl ResolvesServerCert for CurrentCert {
 ///
 /// # Errors
 ///
-/// Fails when the PEM holds no certificate or no key, or the key type is not supported.
+/// Fails when the PEM holds no certificate or no key, the key type is not supported, or the
+/// key is not the certificate's (a cache half written by a crashed process).
 pub fn certified_key(chain_pem: &str, key_pem: &str) -> anyhow::Result<CertifiedKey> {
     let chain: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(chain_pem.as_bytes())
         .collect::<Result<_, _>>()
@@ -69,7 +70,11 @@ pub fn certified_key(chain_pem: &str, key_pem: &str) -> anyhow::Result<Certified
     let key =
         PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context("reading the private key")?;
     let signing_key = any_supported_type(&key).context("the private key type is not supported")?;
-    Ok(CertifiedKey::new(chain, signing_key))
+    let certified = CertifiedKey::new(chain, signing_key);
+    certified
+        .keys_match()
+        .context("the private key does not belong to the certificate")?;
+    Ok(certified)
 }
 
 /// The dates a certificate is valid between.
@@ -264,6 +269,17 @@ mod tests {
         assert!(certified_key(&cert.chain_pem, &cert.key_pem).is_ok());
         assert!(certified_key("", &cert.key_pem).is_err());
         assert!(certified_key(&cert.chain_pem, "").is_err());
+    }
+
+    #[test]
+    fn certified_key_rejects_a_key_that_is_not_the_certificates() {
+        let cert = issue("localhost", (2030, 1, 1), (2031, 1, 1));
+        let other = issue("localhost", (2030, 1, 1), (2031, 1, 1));
+        let error = certified_key(&cert.chain_pem, &other.key_pem).expect_err("mismatch");
+        assert!(
+            format!("{error:#}").contains("does not belong"),
+            "{error:#}"
+        );
     }
 
     /// Does a TLS handshake against `resolver` and returns the certificate the client saw, or
