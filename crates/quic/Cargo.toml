@@ -1,0 +1,20 @@
+[package]
+name = "quic"
+description = "Extracts the TLS ClientHello from a client's QUIC Initial packets"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rustls.workspace = true
+
+[dev-dependencies]
+fingerprint = { path = "../fingerprint" }
+proptest.workspace = true
+quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time"] }
+
+[lints]
+workspace = true

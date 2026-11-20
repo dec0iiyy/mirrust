@@ -1,0 +1,13 @@
+mirrust
+Copyright (C) the mirrust contributors
+
+mirrust began as a Rust port of TrackMe by pagpeter
+(https://github.com/pagpeter/TrackMe), the server behind tls.peet.ws, which is
+licensed under the GNU General Public License version 3.
+
+mirrust is licensed under the GNU General Public License version 3 only
+(GPL-3.0-only). See the LICENSE file for the full text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
