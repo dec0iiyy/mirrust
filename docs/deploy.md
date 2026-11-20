@@ -304,11 +304,11 @@ Encrypt again. A cached certificate for other names, or one that has expired, is
 directory that already exists is used as it is, so check its mode.
 
 **IPv6.** If the name has an `AAAA` record, Let's Encrypt connects over IPv6 first and, if
-that connection fails for any reason, tries IPv4 (`va/tlsalpn.go` in Boulder, the Let's Encrypt
+connecting or the TLS handshake over IPv6 fails, tries IPv4 (`va/tlsalpn.go` in Boulder, the Let's Encrypt
 software). So a server that listens on IPv4 only (`--listen 0.0.0.0:443`) still validates when
 the `AAAA` address does not answer or refuses the connection. It fails when the `AAAA` address
 is another machine that does answer on port 443 (a stale record, a CDN), because there is no
-retry after a connection that succeeded: fix or remove that record, or listen on `[::]:443`
+retry after a handshake that succeeded: fix or remove that record, or listen on `[::]:443`
 (see [Listening address](#listening-address)) when the `AAAA` address is this server's.
 
 **Port.** Let's Encrypt validates on TCP port 443 only. If you give `--listen` another port,
