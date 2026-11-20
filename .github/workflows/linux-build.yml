@@ -1,0 +1,41 @@
+name: Linux build
+
+# Builds the release binary on Ubuntu 24.04 and keeps it for a week, so a Linux server
+# can be tested without compiling there. Run it by hand from the Actions tab or with
+# `gh workflow run linux-build.yml`.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: release (ubuntu-24.04, x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build --release --locked --bin mirrust
+      - name: Collect the binary and its checksum
+        run: |
+          mkdir dist
+          cp target/release/mirrust deploy/mirrust.service dist/
+          (cd dist && sha256sum mirrust > mirrust.sha256 && ls -l)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mirrust-linux-x86_64
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
