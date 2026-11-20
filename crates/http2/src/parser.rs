@@ -255,7 +255,8 @@ impl Parser {
             if let Some(range) = fragment {
                 let start = payload_start + range.start;
                 let fragment = &self.buf[start..payload_start + range.end];
-                frame.headers = decode_headers(fragment, &mut self.header_budget)?;
+                (frame.headers, frame.second_bytes) =
+                    decode_headers(fragment, &mut self.header_budget)?;
             }
             self.pos = payload_end;
             let ends_stream = frame.flags.first() == Some(&"EndStream (0x1)");
@@ -653,10 +654,12 @@ fn setting_name(id: u16) -> String {
 
 /// Decodes one HEADERS fragment with a fresh decoder, as tls.peet.ws does for every frame.
 ///
-/// Each line's bytes come out of `budget`; a block that needs more is not kept.
-fn decode_headers(fragment: &[u8], budget: &mut usize) -> Result<Vec<String>, Error> {
+/// Each line's bytes come out of `budget`; a block that needs more is not kept. The second
+/// value is the second byte of each line before invalid UTF-8 was replaced.
+fn decode_headers(fragment: &[u8], budget: &mut usize) -> Result<(Vec<String>, Vec<u8>), Error> {
     let mut decoder = Decoder::new();
     let mut lines = Vec::new();
+    let mut second_bytes = Vec::new();
     let mut too_large = false;
     decoder
         .decode_with_cb(fragment, |name, value| {
@@ -672,13 +675,15 @@ fn decode_headers(fragment: &[u8], budget: &mut usize) -> Result<Vec<String>, Er
             line.extend_from_slice(&name);
             line.extend_from_slice(b": ");
             line.extend_from_slice(&value);
+            // A line is at least `: `, so it has a second byte.
+            second_bytes.push(line[1]);
             lines.push(go_json_string(&line));
         })
         .map_err(|_| Error::HeaderDecode)?;
     if too_large {
         return Err(Error::HeadersTooLarge);
     }
-    Ok(lines)
+    Ok((lines, second_bytes))
 }
 
 /// Bytes as Go's `encoding/json` shows them: every invalid UTF-8 byte becomes U+FFFD.

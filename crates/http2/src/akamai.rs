@@ -93,13 +93,18 @@ fn priorities(frames: &[ParsedFrame]) -> String {
 
 /// The byte after `:` of each pseudo-header, with a comma after it only when the header is
 /// among the first three of the block (counting regular headers too).
+///
+/// The byte is the one the client sent ([`ParsedFrame::second_bytes`]). For a frame without
+/// them it is the second byte of the line's text, which is the same unless the client's byte
+/// was not UTF-8 and became U+FFFD in the text.
 fn header_order(frames: &[ParsedFrame]) -> String {
     let Some(frame) = frames.iter().find(|f| f.frame_type == "HEADERS") else {
         return String::new();
     };
     let mut order = String::new();
     for (index, header) in frame.headers.iter().enumerate() {
-        if let [b':', letter, ..] = *header.as_bytes() {
+        if let [b':', in_text, ..] = *header.as_bytes() {
+            let letter = frame.second_bytes.get(index).copied().unwrap_or(in_text);
             // Go's `string(header[1])` turns the byte into the code point of the same value.
             order.push(char::from(letter));
             if index < 3 {
@@ -108,4 +113,58 @@ fn header_order(frames: &[ParsedFrame]) -> String {
         }
     }
     order
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::{PREFACE, Parser, Status};
+
+    use super::*;
+
+    /// One HEADERS frame on stream 1 with `END_STREAM | END_HEADERS` and this header block.
+    fn request(block: &[u8]) -> Vec<u8> {
+        let mut bytes = PREFACE.to_vec();
+        bytes.extend([
+            0,
+            0,
+            u8::try_from(block.len()).expect("short"),
+            0x1,
+            0x5,
+            0,
+            0,
+            0,
+            1,
+        ]);
+        bytes.extend(block);
+        bytes
+    }
+
+    #[test]
+    fn a_pseudo_header_byte_that_is_not_utf8_is_the_byte_the_client_sent() {
+        // Literal fields without indexing: the names `:` 0xff and `:m`, each with value `x`.
+        let block = [
+            0x00, 0x02, b':', 0xff, 0x01, b'x', 0x00, 0x02, b':', b'm', 0x01, b'x',
+        ];
+        let mut parser = Parser::new();
+        assert_eq!(parser.feed(&request(&block)), Ok(Status::Complete));
+        let frames = parser.frames();
+        assert_eq!(
+            frames[0].headers,
+            [":\u{fffd}: x", ":m: x"],
+            "the text has U+FFFD"
+        );
+        // tls.peet.ws has Go's `string(header[1])`: the code point with the byte's value,
+        // U+00FF for 0xff. The second byte of the text is 0xef, the first of U+FFFD's three.
+        assert_eq!(akamai_fingerprint(frames), "|00|0|\u{ff},m,");
+    }
+
+    #[test]
+    fn frames_without_the_sent_bytes_use_the_text() {
+        let frame = ParsedFrame {
+            frame_type: "HEADERS".to_owned(),
+            headers: vec![":method: GET".to_owned(), "accept: */*".to_owned()],
+            ..ParsedFrame::default()
+        };
+        assert_eq!(akamai_fingerprint(&[frame]), "|00|0|m,");
+    }
 }

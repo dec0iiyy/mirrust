@@ -26,6 +26,11 @@ pub struct ParsedFrame {
     /// Decoded `name: value` lines of a HEADERS frame.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<String>,
+    /// The second byte of each line of `headers` as the client sent it. `headers` has U+FFFD
+    /// in place of a byte that is not UTF-8, and the Akamai fingerprint is built from the
+    /// byte. Empty for a frame that was not parsed from bytes. Not part of the report.
+    #[serde(skip)]
+    pub second_bytes: Vec<u8>,
     /// `NAME = value` lines of a SETTINGS frame, in wire order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<String>,
