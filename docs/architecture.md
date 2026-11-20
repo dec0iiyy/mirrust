@@ -69,7 +69,9 @@ accept ──► read ClientHello records ──► fingerprint ──► rustls
    - anything else: HTTP/1.1. The request is read until the header block ends or 1024 bytes are
      in, parsed, answered with `Content-Length`, and the connection is closed. Two CRLFs follow
      the body, past `Content-Length`, as tls.peet.ws sends them.
-5. **Route and log.** The router builds the body from the report, the request log gets an entry,
+5. **Route and log.** The router builds the body from the report (`/` is the text report from
+   `text.rs` or the HTML page, chosen by the request's `Accept` header and `?format=`; the
+   header is read from the request into `Report::accept` by each of the three handlers), the request log gets an entry,
    and a one-line summary goes to stdout (written synchronously on the connection's task). The method and path in that line are the client's
    own text, so they are printed with `escape_debug` and cut at 200 characters (`…`); the
    request log is JSON and needs no such step.
@@ -87,7 +89,7 @@ error, escaped and cut at 1024 characters. The text includes the causes of the e
 the parser's reason when the HTTP/2 exchange was rejected.
 
 Every response carries the headers in `routes::RESPONSE_HEADERS` (`Cache-Control: no-store`,
-`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`). The HTTP/1.1 and HTTP/3
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Vary: Accept`). The HTTP/1.1 and HTTP/3
 handlers write them from that list; the HTTP/2 handler passes it to `http2::serve` as
 `extra_headers`, which also puts them on the `OPTIONS` answer and sends the names in lowercase.
 The `OPTIONS` answer is built by the HTTP/2 handler and passed to `http2::serve` as `options`
@@ -208,6 +210,9 @@ directly.
   allocated for them. Refusals are counted and reported on stderr at most once per 10 seconds.
 - **No caching of reports.** Every response says `Cache-Control: no-store`, because a report is
   only true for the connection it was sent on.
+- **Text for terminals.** `/` answers a client that does not accept `text/html` with a plain
+  ASCII report (`crates/server/src/text.rs`) instead of the page. It is rendered from the same
+  `Report` and audit as the JSON, and everything the client chose in it is escaped.
 - **Pages built into the binary.** The index and 404 pages are compiled in. The index page
   receives the report of the connection that loaded it, inlined as JSON; the encoder escapes
   `<`, `>` and `&`, so the report cannot close the `<script>` element it is placed in.

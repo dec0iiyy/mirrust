@@ -44,7 +44,55 @@ listening on https://127.0.0.1:8443 (TCP and HTTP/3 over UDP)
 
 Open <https://localhost:8443> in a browser for the page: the score, every check behind it, the
 fingerprints, the cipher suites and extensions in the order sent, and the full JSON. The
-certificate is self-signed, so use `curl -k` on the command line.
+certificate is self-signed, so use `curl -k` on the command line, where `/` prints a plain-text
+report:
+
+```console
+$ curl -k https://localhost:8443
+mirrust  (h2, TLS 1.3, 127.0.0.1:54902)
+
+AUDIT  100/100  [####################]  consistent
+  Looks like curl 8.7.1 (exact match). The User-Agent claims curl.
+
+  3 checks passed, 1 not measured
+  [ ok ] TLS fingerprint against known clients
+         Identical to curl 8.7.1
+  [ ok ] User-Agent against the TLS stack
+         The User-Agent says curl, the TLS stack is curl
+  [ ok ] HTTP/2 fingerprint against the client
+         Settings, window and header order are those of curl
+  [skip] TCP stack against the User-Agent
+         Not measured: this server did not capture the TCP SYN. Behind a proxy
+         or VPN the TCP stack is the exit's, the User-Agent the device's, and
+         the two disagree here
+
+FINGERPRINTS -----------------------------------------------------------------
+  ja4        t13d4907h2_0d8feac7bc37_7395dae3b2f3
+  ja4_o      t13d4907h2_2677ac475d6b_c6f9150fbe3b
+  ja3        375c6162a492dfbf2795909110ce8424
+  peetprint  0d6ceceb9e71ec096d2022ad0651e2f2
+  akamai     64a832f547be33249bf4d33e8a46c5dc
+             3:100;4:10485760;2:0|1048510465|0|m,s,a,p
+
+TLS --------------------------------------------------------------------------
+  Highest TLS version offered  TLS 1.3 (offers TLS 1.3, TLS 1.2, TLS 1.1, TLS
+                               1.0)
+  Cipher suites                49
+  Extensions                   7
+  ALPN                         h2, http/1.1
+  Server name (SNI)            localhost
+  Post-quantum key exchange    No (groups: X25519, P-256, P-384, P-521)
+  Encrypted ClientHello        Not sent
+  Legacy cipher suites         32 of 49 (8 broken)
+  GREASE                       No
+
+colour: ?color=1  JSON: /api/all  short JSON: /api/clean  page: /?format=html
+```
+
+`/` answers with this text unless the request's `Accept` header contains `text/html` (browsers),
+so curl, wget and scripts get text and browsers get the page; `?format=html` and `?format=text`
+force either, `/text` is always text, and `?color=1` adds ANSI colour for a terminal (off by
+default, so a pipe or a file stays clean).
 
 ## Deploy
 
