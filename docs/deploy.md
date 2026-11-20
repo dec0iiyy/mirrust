@@ -83,9 +83,11 @@ init system) and when it is not run as root. Then, in this order:
 3. Runs `systemctl daemon-reload`, `systemctl enable mirrust.service` and `systemctl restart
    mirrust.service`. The restart starts a stopped service and restarts a running one, which is
    what makes running the command again apply new flags.
-4. Waits up to 5 seconds for `systemctl is-active mirrust.service` to say `active`, prints the
-   state, `journalctl -u mirrust -f` for the log, and the ports to open (TCP 443 and UDP 443).
-   If the service is not active by then, it says so and exits with an error; the reason is in
+4. Waits up to 5 seconds for `systemctl is-active mirrust.service` to say `active`, waits 2
+   more seconds and asks again (a server that cannot bind port 443, because nginx or Apache
+   already holds it, is `active` for a few milliseconds before it exits), prints the state,
+   `journalctl -u mirrust -f` for the log, and the ports to open (TCP 443 and UDP 443). If the
+   service is not active by then, it says so and exits with an error; the reason is in
    `systemctl status mirrust.service` and the journal.
 
 It makes no network connection itself; the certificate order starts when the service does.
