@@ -623,6 +623,9 @@ under its usual name and adds the specified one:
   ([fingerprints.md](fingerprints.md#7-http1)). An HTTP/1.1 response ends with its body;
   tls.peet.ws adds two CRLFs.
 - `tcpip` is present but empty until SYN capture is wired.
+- A few display names differ: five that tls.peet.ws gives the wrong code point (such as
+  `ed25519` for `0x0808`, which is `ed448`) are corrected, and 93 code points it prints as
+  numbers have their IANA names ([fingerprints.md](fingerprints.md#6-readable-ciphers-and-extension-details)).
 
 The exact differences between `ja4` and `ja4_peet`, and every preserved irregularity in the
 extension details and the HTTP/2 fingerprint, are listed in

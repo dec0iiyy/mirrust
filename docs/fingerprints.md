@@ -169,7 +169,41 @@ versions|protocols|groups|signature_algorithms|psk_mode|cert_compression|ciphers
 Both come from `parse_peet` and match tls.peet.ws's JSON.
 
 `ciphers`: one name per suite in the client's order. Known suites by name
-(`TLS_AES_128_GCM_SHA256`); GREASE as `TLS_GREASE (0x0A0A)` (uppercase hex); others as `0x00FF`.
+(`TLS_AES_128_GCM_SHA256`); GREASE as `TLS_GREASE (0x0A0A)` (uppercase hex); others as `0xFF02`.
+
+**Names.** The names of cipher suites, extensions, groups and signature schemes are display
+text. Every fingerprint (`ja3`, `ja4`, `ja4_peet`, `peetprint`) is computed from the numbers,
+so no name can change one. The tables (`crates/fingerprint/src/names.rs`) began as
+tls.peet.ws's and follow three rules, checked against the IANA registries on 2026-11-20:
+
+- A name that tls.peet.ws gives the right code point stays as that service spells it, so that
+  reports compare directly. That covers nearly everything a client sends, including where
+  IANA spells it differently: `P-256 (23)`, `P-384 (24)`, `X25519 (29)` (IANA: `secp256r1`,
+  `secp384r1`, `x25519`), `extended_master_secret (23)` and `delegated_credentials (34)`
+  (IANA now: `extended_main_secret`, `delegated_credential`), `TLS_EMPTY_RENEGOTIATION_INFO`
+  for `0x00ff` (IANA: with `_SCSV`), `X25519Kyber768 (25497)`, and the BoringSSL constant
+  names such as `extensionRenegotiationInfo (boringssl) (65281)`.
+- A name that belongs to another code point is corrected. These differ from tls.peet.ws:
+
+  | Code point | tls.peet.ws | mirrust |
+  | --- | --- | --- |
+  | cipher suite `0x5600` | `TLS_EMPTY_RENEGOTIATION_INFO_SCSV` | `TLS_FALLBACK_SCSV` |
+  | cipher suites `0xff02`, `0xff03` | `256` | `0xFF02`, `0xFF03` (they have no name) |
+  | group 2 | `sect163k1 (2)` | `sect163r1 (2)` |
+  | groups 31, 32, 33 | `P256r1tls13`, `P384r1tls13`, `P521r1tls13` | `brainpoolP256r1tls13`, `brainpoolP384r1tls13`, `brainpoolP512r1tls13` |
+  | signature scheme `0x0808` | `ed25519` | `ed448` |
+
+- Every code point that the registries assign and tls.peet.ws does not know has its registry
+  name, where tls.peet.ws prints a number (`Unknown curve 4587`, `0x905`, `Unknown extension
+  51764`, `0x1307`). There are 93 of them: 51 cipher suites (PSK with GCM and SHA-2, Camellia
+  with SHA-256, SM4, AEGIS, ECCPWD, GOST 2012, Ascon and others), 5 extensions (60 to 63 and
+  `trust_anchors (51764)`), 19 groups (among them `secp256k1 (22)`, the Brainpool curves 26 to
+  28, `MLKEM512 (512)` to `MLKEM1024 (514)`, `SecP256r1MLKEM768 (4587)` and
+  `SecP384r1MLKEM1024 (4589)`) and 18 signature schemes (`mldsa44`, `mldsa65`, `mldsa87`,
+  the twelve `slhdsa_*` and three `bign-*`).
+
+No JSON key changed, and none of the 121 ClientHellos in `corpus/hellos.jsonl` or the 700 in
+`corpus/malformed.jsonl` has one of these code points, so no snapshot changed either.
 
 `extensions`: one object per extension in the client's order, `null` when there are none. Every
 object has `name`; most names are `<name> (<id>)`. Contents by extension:

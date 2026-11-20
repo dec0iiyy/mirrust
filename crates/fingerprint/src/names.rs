@@ -1,6 +1,27 @@
-//! TLS registry names, spelled the way tls.peet.ws prints them so that reports compare
-//! directly. A few entries keep that service's quirks on purpose: duplicate names for distinct
-//! ids (the FIPS and GOST cipher suites, `0x0808` as `ed25519`) and the IANA "Reserved" rows.
+//! Names for the code points of the IANA TLS registries. They are display text only: every
+//! fingerprint is computed from the numbers.
+//!
+//! The tables began as tls.peet.ws's, and they follow three rules:
+//!
+//! - A name that tls.peet.ws gives the right code point stays as that service spells it, so
+//!   that reports compare directly: `P-256` and `X25519` where IANA writes `secp256r1` and
+//!   `x25519`, `extended_master_secret` and `delegated_credentials` where IANA now writes
+//!   `extended_main_secret` and `delegated_credential`, `TLS_EMPTY_RENEGOTIATION_INFO` without
+//!   `_SCSV`, the `BoringSSL` constant names of a few extensions, and names of code points that
+//!   were used but never registered (FORTEZZA, `EXPORT1024`, the first `ChaCha20` suites, GOST,
+//!   the Netscape FIPS suites, which share names).
+//! - A name that belongs to another code point is corrected to the registry's: cipher suite
+//!   `0x5600` is `TLS_FALLBACK_SCSV`, signature scheme `0x0808` is `ed448`, group 2 is
+//!   `sect163r1`, groups 31 to 33 are `brainpoolP256r1tls13`, `brainpoolP384r1tls13` and
+//!   `brainpoolP512r1tls13`. Cipher suites `0xff02` and `0xff03`, which tls.peet.ws calls
+//!   `256`, have no name and print as numbers.
+//! - Every code point the registries assign and tls.peet.ws lacks is here under its registry
+//!   name, without the registry's remarks (`(OBSOLETE)`, `(TEMPORARY ...)`).
+//!
+//! The registries were read on 2026-11-20: TLS Cipher Suites, TLS `ExtensionType` Values,
+//! TLS Supported Groups and TLS `SignatureScheme`, at
+//! <https://www.iana.org/assignments/tls-parameters/> and
+//! <https://www.iana.org/assignments/tls-extensiontype-values/>.
 
 /// Cipher suite name; `None` prints as `0x%04X`.
 #[expect(clippy::too_many_lines, reason = "one match arm per registry entry")]
@@ -95,6 +116,12 @@ pub(crate) fn cipher_suite(id: u16) -> Option<&'static str> {
         0x006b => "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
         0x006c => "TLS_DH_anon_WITH_AES_128_CBC_SHA256",
         0x006d => "TLS_DH_anon_WITH_AES_256_CBC_SHA256",
+        0x006e => "TLS_ASCONAEAD128_ASCONHASH256",
+        0x006f => "TLS_ASCONAEAD128_SHA256",
+        0x0070 => "TLS_AES_128_GCM_ASCONHASH256",
+        0x0071 => "TLS_AES_128_CCM_ASCONHASH256",
+        0x0072 => "TLS_BELT_CHE256_BELT_HASH",
+        0x0073 => "TLS_BASH_PRG_AE2561_BASH256",
         0x0080 => "TLS_GOSTR341094_WITH_28147_CNT_IMIT",
         0x0081 => "TLS_GOSTR341001_WITH_28147_CNT_IMIT",
         0x0082 => "TLS_GOSTR341001_WITH_NULL_GOSTR3411",
@@ -135,19 +162,47 @@ pub(crate) fn cipher_suite(id: u16) -> Option<&'static str> {
         0x00a5 => "TLS_DH_DSS_WITH_AES_256_GCM_SHA384",
         0x00a6 => "TLS_DH_anon_WITH_AES_128_GCM_SHA256",
         0x00a7 => "TLS_DH_anon_WITH_AES_256_GCM_SHA384",
+        0x00a8 => "TLS_PSK_WITH_AES_128_GCM_SHA256",
+        0x00a9 => "TLS_PSK_WITH_AES_256_GCM_SHA384",
+        0x00aa => "TLS_DHE_PSK_WITH_AES_128_GCM_SHA256",
+        0x00ab => "TLS_DHE_PSK_WITH_AES_256_GCM_SHA384",
+        0x00ac => "TLS_RSA_PSK_WITH_AES_128_GCM_SHA256",
+        0x00ad => "TLS_RSA_PSK_WITH_AES_256_GCM_SHA384",
+        0x00ae => "TLS_PSK_WITH_AES_128_CBC_SHA256",
+        0x00af => "TLS_PSK_WITH_AES_256_CBC_SHA384",
+        0x00b0 => "TLS_PSK_WITH_NULL_SHA256",
+        0x00b1 => "TLS_PSK_WITH_NULL_SHA384",
+        0x00b2 => "TLS_DHE_PSK_WITH_AES_128_CBC_SHA256",
+        0x00b3 => "TLS_DHE_PSK_WITH_AES_256_CBC_SHA384",
+        0x00b4 => "TLS_DHE_PSK_WITH_NULL_SHA256",
+        0x00b5 => "TLS_DHE_PSK_WITH_NULL_SHA384",
+        0x00b6 => "TLS_RSA_PSK_WITH_AES_128_CBC_SHA256",
+        0x00b7 => "TLS_RSA_PSK_WITH_AES_256_CBC_SHA384",
+        0x00b8 => "TLS_RSA_PSK_WITH_NULL_SHA256",
+        0x00b9 => "TLS_RSA_PSK_WITH_NULL_SHA384",
         0x00ba => "TLS_RSA_WITH_CAMELLIA_128_CBC_SHA256",
         0x00bb => "TLS_DH_DSS_WITH_CAMELLIA_128_CBC_SHA256",
         0x00bc => "TLS_DH_RSA_WITH_CAMELLIA_128_CBC_SHA256",
         0x00bd => "TLS_DHE_DSS_WITH_CAMELLIA_128_CBC_SHA256",
         0x00be => "TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA256",
         0x00bf => "TLS_DH_anon_WITH_CAMELLIA_128_CBC_SHA256",
+        0x00c0 => "TLS_RSA_WITH_CAMELLIA_256_CBC_SHA256",
+        0x00c1 => "TLS_DH_DSS_WITH_CAMELLIA_256_CBC_SHA256",
+        0x00c2 => "TLS_DH_RSA_WITH_CAMELLIA_256_CBC_SHA256",
+        0x00c3 => "TLS_DHE_DSS_WITH_CAMELLIA_256_CBC_SHA256",
+        0x00c4 => "TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA256",
+        0x00c5 => "TLS_DH_anon_WITH_CAMELLIA_256_CBC_SHA256",
+        0x00c6 => "TLS_SM4_GCM_SM3",
+        0x00c7 => "TLS_SM4_CCM_SM3",
         0x00ff => "TLS_EMPTY_RENEGOTIATION_INFO",
         0x1301 => "TLS_AES_128_GCM_SHA256",
         0x1302 => "TLS_AES_256_GCM_SHA384",
         0x1303 => "TLS_CHACHA20_POLY1305_SHA256",
         0x1304 => "TLS_AES_128_CCM_SHA256",
         0x1305 => "TLS_AES_128_CCM_8_SHA256",
-        0x5600 => "TLS_EMPTY_RENEGOTIATION_INFO_SCSV",
+        0x1306 => "TLS_AEGIS_256_SHA512",
+        0x1307 => "TLS_AEGIS_128L_SHA256",
+        0x5600 => "TLS_FALLBACK_SCSV",
         0xc001 => "TLS_ECDH_ECDSA_WITH_NULL_SHA",
         0xc002 => "TLS_ECDH_ECDSA_WITH_RC4_128_SHA",
         0xc003 => "TLS_ECDH_ECDSA_WITH_3DES_EDE_CBC_SHA",
@@ -323,6 +378,19 @@ pub(crate) fn cipher_suite(id: u16) -> Option<&'static str> {
         0xc0ad => "TLS_ECDHE_ECDSA_WITH_AES_256_CCM",
         0xc0ae => "TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8",
         0xc0af => "TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8",
+        0xc0b0 => "TLS_ECCPWD_WITH_AES_128_GCM_SHA256",
+        0xc0b1 => "TLS_ECCPWD_WITH_AES_256_GCM_SHA384",
+        0xc0b2 => "TLS_ECCPWD_WITH_AES_128_CCM_SHA256",
+        0xc0b3 => "TLS_ECCPWD_WITH_AES_256_CCM_SHA384",
+        0xc0b4 => "TLS_SHA256_SHA256",
+        0xc0b5 => "TLS_SHA384_SHA384",
+        0xc100 => "TLS_GOSTR341112_256_WITH_KUZNYECHIK_CTR_OMAC",
+        0xc101 => "TLS_GOSTR341112_256_WITH_MAGMA_CTR_OMAC",
+        0xc102 => "TLS_GOSTR341112_256_WITH_28147_CNT_IMIT",
+        0xc103 => "TLS_GOSTR341112_256_WITH_KUZNYECHIK_MGM_L",
+        0xc104 => "TLS_GOSTR341112_256_WITH_MAGMA_MGM_L",
+        0xc105 => "TLS_GOSTR341112_256_WITH_KUZNYECHIK_MGM_S",
+        0xc106 => "TLS_GOSTR341112_256_WITH_MAGMA_MGM_S",
         0xcc13 => "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256_OLD",
         0xcc14 => "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256_OLD",
         0xcc15 => "TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256_OLD",
@@ -333,14 +401,16 @@ pub(crate) fn cipher_suite(id: u16) -> Option<&'static str> {
         0xccac => "TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256",
         0xccad => "TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256",
         0xccae => "TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256",
+        0xd001 => "TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256",
+        0xd002 => "TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384",
+        0xd003 => "TLS_ECDHE_PSK_WITH_AES_128_CCM_8_SHA256",
+        0xd005 => "TLS_ECDHE_PSK_WITH_AES_128_CCM_SHA256",
         0xfee0 => "SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA",
         0xfee1 => "SSL_RSA_FIPS_WITH_DES_CBC_SHA",
         0xfefe => "SSL_RSA_FIPS_WITH_DES_CBC_SHA",
         0xfeff => "SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA",
         0xff00 => "TLS_GOSTR341094_RSA_WITH_28147_CNT_MD5",
         0xff01 => "TLS_RSA_WITH_28147_CNT_GOST94",
-        0xff02 => "256",
-        0xff03 => "256",
         _ => return None,
     })
 }
@@ -409,10 +479,15 @@ pub(crate) fn extension(id: u16) -> Option<&'static str> {
         0x0039 => "quic_transport_parameters",
         0x003a => "ticket_request",
         0x003b => "dnssec_chain",
+        0x003c => "sequence_number_encryption_algorithms",
+        0x003d => "rrc",
+        0x003e => "tls_flags",
+        0x003f => "dane_clientid",
         0x04d2 => "extensionCustom (boringssl)",
         0x3374 => "extensionNextProtoNeg (boringssl)",
         0x4469 => "extensionApplicationSettings (boringssl)",
         0x7550 => "extensionChannelID (boringssl)",
+        0xca34 => "trust_anchors",
         0xfd00 => "extensionECHOuterExtensions (boringssl)",
         0xfe0d => "extensionEncryptedClientHello (boringssl)",
         0xff01 => "extensionRenegotiationInfo (boringssl)",
@@ -426,7 +501,7 @@ pub(crate) fn extension(id: u16) -> Option<&'static str> {
 pub(crate) fn curve(id: u16) -> Option<&'static str> {
     Some(match id {
         0x0001 => "sect163k1 (1)",
-        0x0002 => "sect163k1 (2)",
+        0x0002 => "sect163r1 (2)",
         0x0003 => "sect163r2 (3)",
         0x0004 => "sect193r1 (4)",
         0x0005 => "sect193r2 (5)",
@@ -446,14 +521,18 @@ pub(crate) fn curve(id: u16) -> Option<&'static str> {
         0x0013 => "secp192r1 (19)",
         0x0014 => "secp224k1 (20)",
         0x0015 => "P-224 (21)",
+        0x0016 => "secp256k1 (22)",
         0x0017 => "P-256 (23)",
         0x0018 => "P-384 (24)",
         0x0019 => "P-521 (25)",
+        0x001a => "brainpoolP256r1 (26)",
+        0x001b => "brainpoolP384r1 (27)",
+        0x001c => "brainpoolP512r1 (28)",
         0x001d => "X25519 (29)",
         0x001e => "X448 (30)",
-        0x001f => "P256r1tls13 (31)",
-        0x0020 => "P384r1tls13 (32)",
-        0x0021 => "P521r1tls13 (33)",
+        0x001f => "brainpoolP256r1tls13 (31)",
+        0x0020 => "brainpoolP384r1tls13 (32)",
+        0x0021 => "brainpoolP512r1tls13 (33)",
         0x0022 => "GC256A (34)",
         0x0023 => "GC256B (35)",
         0x0024 => "GC256C (36)",
@@ -462,25 +541,36 @@ pub(crate) fn curve(id: u16) -> Option<&'static str> {
         0x0027 => "GC512B (39)",
         0x0028 => "GC512C (40)",
         0x0029 => "SM2 (41)",
+        0x002a => "bign-curve256v1 (42)",
+        0x002b => "bign-curve384v1 (43)",
+        0x002c => "bign-curve512v1 (44)",
         0x0100 => "ffdhe2048 (256)",
         0x0101 => "ffdhe3072 (257)",
         0x0102 => "ffdhe4096 (258)",
         0x0103 => "ffdhe6144 (259)",
         0x0104 => "ffdhe8192 (260)",
+        0x0200 => "MLKEM512 (512)",
+        0x0201 => "MLKEM768 (513)",
+        0x0202 => "MLKEM1024 (514)",
+        0x11e9 => "SecP256r1MLKEM512 (4585)",
+        0x11ea => "MLKEM512X25519 (4586)",
+        0x11eb => "SecP256r1MLKEM768 (4587)",
         0x11ec => "X25519MLKEM768 (4588)",
+        0x11ed => "SecP384r1MLKEM1024 (4589)",
+        0x11ee => "curveSM2MLKEM768 (4590)",
+        0x11ef => "MLKEM1024X448 (4591)",
         0x4138 => "CECPQ2 (16696)",
         0x6399 => "X25519Kyber768 (25497)",
+        0x639a => "SecP256r1Kyber768Draft00 (25498)",
         0xfe30 => "X25519Kyber512 (65072)",
         0xfe31 => "X25519Kyber768 (65073)",
+        0xff01 => "arbitrary_explicit_prime_curves (65281)",
+        0xff02 => "arbitrary_explicit_char2_curves (65282)",
         _ => return None,
     })
 }
 
 /// Signature scheme; `None` prints as `0x%x`.
-#[expect(
-    clippy::match_same_arms,
-    reason = "tls.peet.ws names 0x0808 ed25519 too"
-)]
 pub(crate) fn signature(id: u16) -> Option<&'static str> {
     Some(match id {
         0x0201 => "rsa_pkcs1_sha1",
@@ -506,17 +596,85 @@ pub(crate) fn signature(id: u16) -> Option<&'static str> {
         0x070d => "gostr34102012_512a",
         0x070e => "gostr34102012_512b",
         0x070f => "gostr34102012_512c",
+        0x0710 => "bign-with-hbelt",
+        0x0711 => "bign-with-bash384",
+        0x0712 => "bign-with-bash512",
         0x0804 => "rsa_pss_rsae_sha256",
         0x0805 => "rsa_pss_rsae_sha384",
         0x0806 => "rsa_pss_rsae_sha512",
         0x0807 => "ed25519",
-        0x0808 => "ed25519",
+        0x0808 => "ed448",
         0x0809 => "rsa_pss_pss_sha256",
         0x080a => "rsa_pss_pss_sha384",
         0x080b => "rsa_pss_pss_sha512",
         0x081a => "ecdsa_brainpoolP256r1tls13_sha256",
         0x081b => "ecdsa_brainpoolP384r1tls13_sha384",
         0x081c => "ecdsa_brainpoolP512r1tls13_sha512",
+        0x0904 => "mldsa44",
+        0x0905 => "mldsa65",
+        0x0906 => "mldsa87",
+        0x0911 => "slhdsa_sha2_128s",
+        0x0912 => "slhdsa_sha2_128f",
+        0x0913 => "slhdsa_sha2_192s",
+        0x0914 => "slhdsa_sha2_192f",
+        0x0915 => "slhdsa_sha2_256s",
+        0x0916 => "slhdsa_sha2_256f",
+        0x0917 => "slhdsa_shake_128s",
+        0x0918 => "slhdsa_shake_128f",
+        0x0919 => "slhdsa_shake_192s",
+        0x091a => "slhdsa_shake_192f",
+        0x091b => "slhdsa_shake_256s",
+        0x091c => "slhdsa_shake_256f",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_that_belonged_to_another_code_point_is_the_registrys() {
+        assert_eq!(cipher_suite(0x5600), Some("TLS_FALLBACK_SCSV"));
+        assert_eq!(signature(0x0807), Some("ed25519"));
+        assert_eq!(signature(0x0808), Some("ed448"));
+        assert_eq!(curve(1), Some("sect163k1 (1)"));
+        assert_eq!(curve(2), Some("sect163r1 (2)"));
+        assert_eq!(curve(33), Some("brainpoolP512r1tls13 (33)"));
+        // tls.peet.ws calls both `256`; they are private-use numbers without a name.
+        assert_eq!(cipher_suite(0xff02), None);
+        assert_eq!(cipher_suite(0xff03), None);
+    }
+
+    #[test]
+    fn code_points_registered_since_have_their_registry_names() {
+        assert_eq!(curve(0x0016), Some("secp256k1 (22)"));
+        assert_eq!(curve(0x0201), Some("MLKEM768 (513)"));
+        assert_eq!(curve(0x11eb), Some("SecP256r1MLKEM768 (4587)"));
+        assert_eq!(curve(0x11ed), Some("SecP384r1MLKEM1024 (4589)"));
+        assert_eq!(signature(0x0905), Some("mldsa65"));
+        assert_eq!(signature(0x091c), Some("slhdsa_shake_256f"));
+        assert_eq!(extension(0xca34), Some("trust_anchors"));
+        assert_eq!(cipher_suite(0x1307), Some("TLS_AEGIS_128L_SHA256"));
+        assert_eq!(cipher_suite(0x00c6), Some("TLS_SM4_GCM_SM3"));
+        assert_eq!(
+            cipher_suite(0x00a8),
+            Some("TLS_PSK_WITH_AES_128_GCM_SHA256")
+        );
+    }
+
+    #[test]
+    fn a_tls_peet_ws_spelling_of_the_right_code_point_stays() {
+        assert_eq!(curve(23), Some("P-256 (23)"));
+        assert_eq!(curve(29), Some("X25519 (29)"));
+        assert_eq!(curve(0x11ec), Some("X25519MLKEM768 (4588)"));
+        assert_eq!(extension(23), Some("extended_master_secret"));
+        assert_eq!(extension(34), Some("delegated_credentials"));
+        assert_eq!(
+            extension(0xff01),
+            Some("extensionRenegotiationInfo (boringssl)")
+        );
+        assert_eq!(cipher_suite(0x00ff), Some("TLS_EMPTY_RENEGOTIATION_INFO"));
+        assert_eq!(cipher_suite(0x1301), Some("TLS_AES_128_GCM_SHA256"));
+    }
 }
