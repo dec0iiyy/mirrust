@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/dec0iiyy/mirrust/discussions
+    about: How do I run it, why did the audit say that, would this be useful? Ask in Discussions.
+  - name: Security problem
+    url: https://github.com/dec0iiyy/mirrust/security/advisories/new
+    about: A crash, a hang or unbounded memory use reachable from the network. Report it privately.

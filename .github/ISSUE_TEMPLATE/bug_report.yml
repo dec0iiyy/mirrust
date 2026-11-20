@@ -1,0 +1,49 @@
+name: Bug report
+description: mirrust crashes, gives a wrong value, or the documentation does not match what happens.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: One or two sentences. Paste error text or log lines in the box below.
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How do you run mirrust?
+      options:
+        - Release binary
+        - Docker image
+        - Built from source
+        - systemd service from deploy/
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release tag, the image tag, or the output of `git rev-parse --short HEAD`.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: Ubuntu 24.04 x86_64, macOS 15 arm64, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command line and client
+      description: The flags you started mirrust with, and the client you connected with (browser and version, `curl --version`, library).
+      render: console
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What mirrust printed, or the relevant lines of the JSON from `/api/all`. Remove anything private such as IP addresses.
+      render: text

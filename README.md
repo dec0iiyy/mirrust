@@ -2,6 +2,18 @@
 
 <p align="center"><b>See your client the way the network sees it.</b></p>
 
+<p align="center">
+  <a href="https://github.com/dec0iiyy/mirrust/actions/workflows/ci.yml"><img src="https://github.com/dec0iiyy/mirrust/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/dec0iiyy/mirrust/releases/latest">Download</a> &middot;
+  <a href="docs/docker.md">Docker</a> &middot;
+  <a href="docs/deploy.md">Deploy</a> &middot;
+  <a href="docs/reference.md">Reference</a> &middot;
+  <a href="https://github.com/dec0iiyy/mirrust/discussions">Discussions</a>
+</p>
+
 mirrust is an HTTPS server in one small binary. It reads the TLS ClientHello, the HTTP/2 frames
 and the HTTP/3 handshake of every connection, computes the fingerprints that anti-bot systems
 use, and scores whether those layers agree with each other and with the `User-Agent`.
