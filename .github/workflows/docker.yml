@@ -224,11 +224,42 @@ jobs:
           docker rm --force "$CONTAINER" || true
           docker volume rm mirrust-smoke-data || true
 
+  version:
+    # A run that publishes needs a tag equal to "v" + the version of the `server` package,
+    # the one that holds the `mirrust` binary. It is the rule of release.yml's `meta` job,
+    # repeated here because a job cannot depend on one in another workflow: without it a
+    # stray `v*` tag would publish an image under a version the code does not have.
+    name: tag matches Cargo.toml
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && (github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the tag against Cargo.toml
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --no-deps --locked --format-version 1 \
+            | jq -r '.packages[] | select(.name == "server") | .version')
+          if [ -z "$version" ]; then
+            echo "::error::The package 'server' has no version in cargo metadata."
+            exit 1
+          fi
+          if [ "$REF_NAME" != "v$version" ]; then
+            echo "::error::The tag is '$REF_NAME', but the version of the 'server' package in crates/server/Cargo.toml is $version (expected the tag v$version). No image is published. Fix the version or the tag."
+            exit 1
+          fi
+          echo "Tag $REF_NAME matches version $version."
+
   publish:
     # Pushes one image per platform by digest, with no tag. The tags are put on in `merge`,
-    # only when both platforms are there.
+    # only when both platforms are there. It needs `version`, so a tag that does not match
+    # the version in Cargo.toml publishes nothing.
     name: push (${{ matrix.platform }})
-    needs: [changes, smoke]
+    needs: [changes, smoke, version]
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && (github.event_name == 'push' || inputs.publish)
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45

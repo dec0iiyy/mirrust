@@ -181,7 +181,9 @@ below work for a repository admin, who bypasses the ruleset, and fail for anyone
 
 - **Version check:** the tag and `crates/server/Cargo.toml` disagree. No release exists, so
   delete the tag (`git push origin :refs/tags/v0.2.0`, `git tag -d v0.2.0`), fix the
-  version, commit, and tag again.
+  version, commit, and tag again. The `Docker` workflow, which the same tag starts, makes the
+  same check in its `tag matches Cargo.toml` job before it pushes anything, so no image is
+  published either. (That job has not run on a mismatched tag; `actionlint` passes on it.)
 - **A build or smoke-test job:** nothing was published. Fix the cause on `main`, delete the
   tag as above and tag the new commit. "Re-run failed jobs" on the old run builds the old
   commit again, which helps only for a runner or network failure.
