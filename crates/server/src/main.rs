@@ -283,6 +283,25 @@ fn prepare_acme(args: AcmeArgs) -> anyhow::Result<Acme> {
     })
 }
 
+/// The error for a failed `bind`. A busy port is the usual cause on a desktop, typically another
+/// mirrust that is still running, so say that and what to do about it.
+fn bind_error(protocol: &str, addr: SocketAddr, error: std::io::Error) -> anyhow::Error {
+    let hint = match error.kind() {
+        std::io::ErrorKind::AddrInUse => format!(
+            "\nport {} is already in use, probably by another mirrust that is still running; \
+             stop it, or listen elsewhere with --listen 127.0.0.1:<another port>",
+            addr.port()
+        ),
+        std::io::ErrorKind::PermissionDenied if addr.port() < 1024 => format!(
+            "\nport {} needs privileges on this system; use a port above 1023 or run as a user \
+             that may bind it",
+            addr.port()
+        ),
+        _ => String::new(),
+    };
+    anyhow::Error::new(error).context(format!("cannot listen on {protocol} {addr}{hint}"))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut args = match parse_args(std::env::args().skip(1))? {
@@ -309,7 +328,7 @@ async fn main() -> anyhow::Result<()> {
     let tls = Arc::new(tls);
     let listener = TcpListener::bind(args.listen)
         .await
-        .with_context(|| format!("listening on {}", args.listen))?;
+        .map_err(|error| bind_error("tcp", args.listen, error))?;
     let writer = match &args.log {
         Some(path) => {
             let (log, writer) = RequestLog::open(path)
@@ -322,7 +341,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let addr = listener.local_addr()?;
     // HTTP/3 on the same address and port, over UDP.
-    let udp = UdpSocket::bind(addr).with_context(|| format!("listening on udp {addr}"))?;
+    let udp = UdpSocket::bind(addr).map_err(|error| bind_error("udp", addr, error))?;
     let mut config = args.config;
     config.h3_port = Some(addr.port());
     let config = Arc::new(config);
@@ -557,5 +576,22 @@ mod tests {
         assert!(error(&["--domain"]).contains("--domain needs a value"));
         assert!(error(&["--acme-dir"]).contains("--acme-dir needs a value"));
         assert!(error(&["--bogus", "x"]).contains("unknown flag"));
+    }
+
+    #[test]
+    fn a_busy_port_is_explained() {
+        let addr: SocketAddr = "127.0.0.1:8443".parse().expect("address");
+        let busy = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+        let text = format!("{:#}", bind_error("tcp", addr, busy));
+        assert!(
+            text.contains("cannot listen on tcp 127.0.0.1:8443"),
+            "{text}"
+        );
+        assert!(text.contains("already in use"), "{text}");
+        assert!(text.contains("--listen"), "{text}");
+
+        let other = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let text = format!("{:#}", bind_error("udp", addr, other));
+        assert!(!text.contains("already in use"), "{text}");
     }
 }
