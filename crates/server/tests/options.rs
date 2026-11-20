@@ -55,6 +55,8 @@ fn options_http1(addr: SocketAddr, roots: RootCertStore) -> Headers {
         .lines()
         .skip(1)
         .filter_map(|line| line.split_once(": "))
+        // HTTP/2 has no connection-specific headers (RFC 9113 section 8.2.2).
+        .filter(|(name, _)| !name.eq_ignore_ascii_case("connection"))
         .map(|(name, value)| (name.to_ascii_lowercase(), value.to_owned()))
         .collect();
     headers.sort();

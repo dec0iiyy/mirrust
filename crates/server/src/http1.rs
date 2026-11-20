@@ -44,7 +44,7 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
         _ => "OK",
     };
     let mut head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nContent-Type: {content_type}; charset=utf-8\r\n",
+        "HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: {content_type}; charset=utf-8\r\n",
         body.len()
     );
     for (name, value) in RESPONSE_HEADERS {

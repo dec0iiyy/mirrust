@@ -74,6 +74,8 @@ fn get_with_status(
     let alt_svc = format!("\r\nAlt-Svc: h3=\":{}\"; ma=86400\r\n", addr.port());
     assert!(head.contains(&alt_svc), "{head}");
     for header in [
+        // The server closes after every response and must say so (RFC 9112 section 9.3).
+        "Connection: close",
         "Cache-Control: no-store",
         "X-Content-Type-Options: nosniff",
         "Referrer-Policy: no-referrer",

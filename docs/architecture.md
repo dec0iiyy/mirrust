@@ -81,7 +81,7 @@ accept ──► read ClientHello records ──► ALPN acme-tls/1? ──yes�
      report, and answers on the last HEADERS frame's stream with HEADERS, the body in 1024-byte DATA frames, an empty DATA with
      `END_STREAM`, and GOAWAY. It waits 500 ms and closes.
    - anything else: HTTP/1.1. The request is read until the header block ends or 1024 bytes are
-     in, parsed, answered with `Content-Length`, and the connection is closed. Two CRLFs follow
+     in, parsed, answered with `Content-Length` and `Connection: close`, and the connection is closed. Two CRLFs follow
      the body, past `Content-Length`, as tls.peet.ws sends them.
 5. **Route and log.** The router builds the body from the report (`/` is the text report from
    `text.rs` or the HTML page, chosen by the request's `Accept` header and `?format=`; the
