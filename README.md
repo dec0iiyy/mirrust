@@ -95,19 +95,19 @@ default, so a pipe or a file stays clean).
 
 ## Deploy
 
-On a Linux server with a host name pointing at it, three steps:
+On a Linux server with a DNS `A` record for your host name pointing at it:
 
 ```console
 $ cargo build --release && sudo install target/release/mirrust /usr/local/bin/
-$ sudo certbot certonly --standalone -d mirror.example.com
-$ sudo mkdir -p /var/log/mirrust && sudo mirrust --listen 0.0.0.0:443 \
-    --cert /etc/letsencrypt/live/mirror.example.com/fullchain.pem \
-    --key  /etc/letsencrypt/live/mirror.example.com/privkey.pem \
-    --log  /var/log/mirrust/requests.jsonl
+$ sudo mirrust --domain mirror.example.com
 ```
 
-Open TCP and UDP port 443: UDP carries HTTP/3. For a sandboxed systemd service, certificate
-renewal, log rotation and Docker, follow [docs/deploy.md](docs/deploy.md).
+mirrust gets a Let's Encrypt certificate for that name by itself (TLS-ALPN-01 on port 443, so
+no port 80) and renews it; `--domain` means you accept the Let's Encrypt Subscriber Agreement.
+Open TCP and UDP port 443 and nothing else: UDP carries HTTP/3. Issuance against the real
+Let's Encrypt has not been run yet; try `--acme-staging` first. For a sandboxed systemd
+service, certificate files from certbot instead, log rotation and Docker, follow
+[docs/deploy.md](docs/deploy.md).
 
 ## Documentation
 
@@ -118,10 +118,10 @@ renewal, log rotation and Docker, follow [docs/deploy.md](docs/deploy.md).
 
 ## Status
 
-Version 0.1.0. 218 tests, run on Ubuntu and macOS in CI. The release binary built in CI has run
+Version 0.1.0. 247 tests, run on Ubuntu and macOS in CI. The release binary built in CI has run
 under the sandboxed systemd unit on an Ubuntu 24.04 server, on port 8443, and answered over
-HTTP/1.1, HTTP/2 and, with Chrome, HTTP/3. Not run yet: port 443, Let's Encrypt, log rotation
-and the Docker image. The server does not capture TCP SYN packets yet, so the TCP checks show as
+HTTP/1.1, HTTP/2 and, with Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client
+against Let's Encrypt (its CA exchange has no test), log rotation and the Docker image. The server does not capture TCP SYN packets yet, so the TCP checks show as
 not measured. Details are in [Reference](docs/reference.md#status).
 
 ## License
