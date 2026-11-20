@@ -1,0 +1,356 @@
+name: Docker
+
+# Builds the container image from deploy/Dockerfile and smoke-tests it, on every pull request
+# and push that touches the image's inputs. On a tag `v*` (or a manual run from a tag with
+# `publish` set) it also publishes ghcr.io/dec0iiyy/mirrust for linux/amd64 and linux/arm64.
+# See docs/docker.md.
+#
+# Each platform is built on a runner of its own architecture, not under QEMU: the Rust build
+# is far too slow when emulated. The two images are pushed by digest, then one job joins them
+# into a multi-platform tag and attests its provenance.
+on:
+  pull_request:
+    paths:
+      - deploy/Dockerfile
+      - .dockerignore
+      - crates/**
+      - corpus/clients.jsonl
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/docker.yml
+  push:
+    # A path filter would also decide which tag pushes run, so tags are filtered by the
+    # `changes` job below for branches only.
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Push the image to GHCR (run this workflow from a v* tag)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A new push to the same branch or pull request cancels the run it supersedes; a tag run
+# is never cancelled, so a release is not left half published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  IMAGE: ghcr.io/dec0iiyy/mirrust
+
+jobs:
+  changes:
+    # Decides whether the image's inputs changed. Pull requests are already filtered by
+    # `paths` above; a push to a branch is compared with the commit before it; tags and
+    # manual runs always build.
+    name: changed files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.diff.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          build=true
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = branch ]; then
+            if files=$(git diff --name-only "$BEFORE" "$AFTER" 2>/dev/null); then
+              if printf '%s\n' "$files" | grep -Eq '^(deploy/Dockerfile|\.dockerignore|crates/|corpus/clients\.jsonl|Cargo\.toml|Cargo\.lock|\.github/workflows/docker\.yml)'; then
+                build=true
+              else
+                build=false
+              fi
+            fi
+            # On a new branch or a forced push the old commit is unknown: build to be safe.
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "image inputs changed: $build"
+
+  smoke:
+    # Builds the image for the runner's own platform, without pushing, and runs it.
+    name: build and smoke test (${{ matrix.platform }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    env:
+      TEST_IMAGE: mirrust:ci
+      CONTAINER: mirrust-smoke
+      PORT: "18443"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: ${{ env.TEST_IMAGE }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=mirrust-${{ matrix.arch }}
+          cache-to: type=gha,scope=mirrust-${{ matrix.arch }},mode=max,ignore-error=true
+
+      - name: Check the user and print the size
+        run: |
+          user=$(docker image inspect --format '{{.Config.User}}' "$TEST_IMAGE")
+          size=$(docker image inspect --format '{{.Size}}' "$TEST_IMAGE")
+          echo "image user: '$user'"
+          echo "image size: $size bytes"
+          docker image ls "$TEST_IMAGE"
+          {
+            echo "### ${{ matrix.platform }}"
+            echo "- user: \`$user\`"
+            echo "- size: $((size / 1024 / 1024)) MiB ($size bytes)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The user must be numeric and not root (uid 0), also in the form uid:gid.
+          case "$user" in
+            "" | 0 | 0:* | root | root:*)
+              echo "::error::the image runs as root or does not set a user: '$user'"
+              exit 1
+              ;;
+          esac
+          case "$user" in
+            *[!0-9:]*)
+              echo "::error::the image user should be a numeric uid:gid, got '$user'"
+              exit 1
+              ;;
+          esac
+
+      - name: Run the container
+        # The same options as deploy/compose.yaml: read-only root, no capabilities, and the
+        # sysctl that lets the non-root user bind port 443. The host side is a high port; the
+        # container still listens on 443.
+        run: |
+          docker volume create mirrust-smoke-data
+          docker run --detach --name "$CONTAINER" \
+            --publish "127.0.0.1:$PORT:443/tcp" \
+            --publish "127.0.0.1:$PORT:443/udp" \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --read-only \
+            --memory 512m \
+            --pids-limit 512 \
+            --volume mirrust-smoke-data:/data \
+            "$TEST_IMAGE" --listen 0.0.0.0:443 --log /data/requests.jsonl
+          for _ in $(seq 1 30); do
+            if docker logs "$CONTAINER" 2>&1 | grep -q '^listening on '; then
+              echo "the server is listening"
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER")" != true ]; then
+              echo "::error::the container stopped before it listened"
+              docker logs "$CONTAINER" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::the server did not print its listening line in 30 seconds"
+          docker logs "$CONTAINER" || true
+          exit 1
+
+      - name: Request /api/clean over HTTP/2 and HTTP/1.1
+        # -k: the server has a self-signed certificate for localhost. The UDP port is
+        # published but not tested: the runner's curl has no HTTP/3.
+        run: |
+          fetch() {
+            curl --silent --show-error --fail --insecure --max-time 15 \
+              --retry 5 --retry-connrefused --retry-delay 1 "$@" \
+              "https://127.0.0.1:$PORT/api/clean"
+          }
+          for spec in "--http2 h2" "--http1.1 HTTP/1.1"; do
+            flag=${spec% *}
+            want=${spec#* }
+            body=$(fetch "$flag")
+            printf '%s\n' "$body" | jq -c '{http_version, score: .audit.score, verdict: .audit.verdict}'
+            printf '%s\n' "$body" | jq -e --arg want "$want" \
+              '(.audit.score | type == "number") and .http_version == $want'
+          done
+          # The HTTP/1.1 and HTTP/2 answers advertise HTTP/3 on the port the server listens on.
+          curl --silent --show-error --insecure --max-time 15 --dump-header - --output /dev/null \
+            "https://127.0.0.1:$PORT/api/clean" | grep -i '^alt-svc: h3=":443"'
+
+      - name: Show the logs and stop the container
+        if: always()
+        run: |
+          docker logs "$CONTAINER" || true
+          docker stop "$CONTAINER" || true
+          echo "exit code: $(docker inspect --format '{{.State.ExitCode}}' "$CONTAINER" || true)"
+
+      - name: Check the clean exit and the request log
+        # SIGTERM must end the server cleanly (exit code 0), and it must have written the log
+        # to the volume as the non-root user.
+        run: |
+          code=$(docker inspect --format '{{.State.ExitCode}}' "$CONTAINER")
+          if [ "$code" != 0 ]; then
+            echo "::error::the server exited with code $code after SIGTERM"
+            exit 1
+          fi
+          docker cp "$CONTAINER:/data/requests.jsonl" - | tar -xO | jq -s -e 'length >= 2' > /dev/null
+          echo "the request log has entries"
+
+      - name: Remove the container and the volume
+        if: always()
+        run: |
+          docker rm --force "$CONTAINER" || true
+          docker volume rm mirrust-smoke-data || true
+
+  publish:
+    # Pushes one image per platform by digest, with no tag. The tags are put on in `merge`,
+    # only when both platforms are there.
+    name: push (${{ matrix.platform }})
+    needs: [changes, smoke]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && (github.event_name == 'push' || inputs.publish)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          # Provenance is attached to the joined image in `merge`; the per-platform
+          # BuildKit attestations are left out because they would not survive the join as
+          # attestations of the combined image.
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=mirrust-${{ matrix.arch }}
+      - name: Export the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: tag the multi-platform image
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      # actions/attest signs with the workflow's OIDC token and stores the attestation.
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          # v1.2.3 gives 1.2.3, 1.2 and latest; a pre-release such as v1.2.3-rc.1 gives
+          # only 1.2.3-rc.1.
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - name: Create the manifest list
+        env:
+          METADATA: ${{ steps.meta.outputs.json }}
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          mapfile -t tag_args < <(jq -r '.tags[] | "--tag", .' <<< "$METADATA")
+          if [ "${#tag_args[@]}" -eq 0 ]; then
+            echo "::error::no image tags were produced for ref '$GITHUB_REF_NAME' (is it vMAJOR.MINOR.PATCH?)"
+            exit 1
+          fi
+          refs=()
+          for digest in *; do
+            refs+=("$IMAGE@sha256:$digest")
+          done
+          if [ "${#refs[@]}" -ne 2 ]; then
+            echo "::error::expected 2 platform digests, found ${#refs[@]}"
+            exit 1
+          fi
+          docker buildx imagetools create "${tag_args[@]}" "${refs[@]}"
+      - name: Inspect the result
+        id: inspect
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          for platform in linux/amd64 linux/arm64; do
+            docker buildx imagetools inspect "$IMAGE:$VERSION" | grep -q "Platform: *$platform" \
+              || { echo "::error::$platform is missing from $IMAGE:$VERSION"; exit 1; }
+          done
+      - name: Attest the build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.inspect.outputs.digest }}
+          push-to-registry: true
