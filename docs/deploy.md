@@ -264,7 +264,10 @@ acme: failed: creating the ACME account: client error (Connect): tcp connect err
 ```
 
 The waits are 5 minutes, then twice as long after each failure, at most 6 hours, and start
-again after a success. While a renewal fails, the old certificate stays in use. An attempt that
+again after a success. They survive a restart: the failures are recorded in `last-failure.txt`
+in the cache, and a restart waits out the rest of the wait instead of ordering at once, so
+restarting while you fix DNS or the firewall does not use up Let's Encrypt's limit of five
+failed validations per name and hour (delete the file to try at once). While a renewal fails, the old certificate stays in use. An attempt that
 takes longer than 10 minutes counts as failed.
 
 **Try it first with `--acme-staging`.** The staging CA has far higher rate limits, so a
@@ -287,7 +290,8 @@ server whose public address is a NAT mapping of a private one, so give such a se
 
 **The cache.** `--acme-dir` is created with mode 0700 if it does not exist, and holds, in a
 subdirectory per CA, `account.json` (the ACME account key), `private-key.pem`,
-`certificate.pem` and `names.txt`, all with mode 0600. Keep it private, and keep it across
+`certificate.pem`, `names.txt` and, after a failed attempt, `last-failure.txt`, all with mode
+0600. Keep it private, and keep it across
 restarts: a restart that finds a valid certificate for the same names does not ask Let's
 Encrypt again. A cached certificate for other names, or one that has expired, is ignored. A
 directory that already exists is used as it is, so check its mode.
