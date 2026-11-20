@@ -618,6 +618,10 @@ under its usual name and adds the specified one:
   neither. `/api/clean` carries only the `audit` score and verdict.
 - `quic` and `http3` are added to HTTP/3 reports.
 - Unknown paths answer 404 and a route that cannot answer gives 500, with `{"error": "..."}`.
+- `http1.headers` lists the header lines of the request head, up to 16 KiB of it. tls.peet.ws
+  reads 1024 bytes and also lists the request line and body lines that contain a `:`
+  ([fingerprints.md](fingerprints.md#7-http1)). An HTTP/1.1 response ends with its body;
+  tls.peet.ws adds two CRLFs.
 - `tcpip` is present but empty until SYN capture is wired.
 
 The exact differences between `ja4` and `ja4_peet`, and every preserved irregularity in the

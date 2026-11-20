@@ -106,9 +106,21 @@ accept ──► read ClientHello records ──► ALPN acme-tls/1? ──yes�
      closing a socket with unread input resets the connection and the reset can overtake the
      GOAWAY. Bytes that are not the HTTP/2 preface get no frame (section 3.4), and neither
      does a connection that fails or times out.
-   - anything else: HTTP/1.1. The request is read until the header block ends or 1024 bytes are
-     in, parsed, answered with `Content-Length` and `Connection: close`, and the connection is closed. Two CRLFs follow
-     the body, past `Content-Length`, as tls.peet.ws sends them.
+   - anything else: HTTP/1.1. The request is read until its head ends (the first empty line)
+     or 16 KiB are in, parsed, and answered with `Content-Length` and `Connection: close`.
+     The server then shuts down its sending side and reads on for up to 500 ms, until the
+     client closes: a request can be longer than what was read (a body, a head over 16 KiB),
+     and closing a socket with unread input resets the connection, which can cost the client
+     the response. Three things here differ from tls.peet.ws, which this code began as a copy
+     of, because RFC 9112 is the better guide for a public server:
+     - Nothing follows the body. tls.peet.ws writes two CRLFs past `Content-Length`.
+     - A line may end with a bare LF (RFC 9112 section 2.2 allows a recipient to accept it).
+       Before, only CRLF CRLF ended a head, so a client that sent bare LFs got no answer until
+       the connection's 15 seconds ran out.
+     - The read limit is 16 KiB, not 1024 bytes, so the head of a browser's request with its
+       cookies is read whole. A head over 16 KiB is not refused with 431: the report is built
+       from the part that was read, its last line cut, and the `audit` does not judge the
+       headers of such a request, since some may be missing.
 5. **Route and log.** The router builds the body from the report (`/` is the text report from
    `text.rs` or the HTML page, chosen by the request's `Accept` header and `?format=`; the
    header is read from the request into `Report::accept` by each of the three handlers), the request log gets an entry,
@@ -258,7 +270,7 @@ directly.
 - **Bounded memory per client.** HTTP/3 header section ≤ 64 KiB, 128 KiB per stream and 256 KiB
   per QUIC connection in flight, ClientHello ≤ 64 KiB over TCP, CRYPTO data ≤ 16 KiB per QUIC
   connection (buffer ≤ received prefix + 4 KiB), HTTP/2 input ≤ 64 KiB and ≤ 256 frames before
-  the first request ends, HTTP/1 request ≤ 1024 bytes, sniffing tables ≤ 4096 entries, log queue
+  the first request ends, HTTP/1 request ≤ 16 KiB, sniffing tables ≤ 4096 entries, log queue
   ≤ 4096 entries, 15 s per connection.
 - **Bounded number of clients.** At most `--max-connections` connections (1024 by default) are
   open at once, TCP and QUIC together; the rest are closed or refused before any of the above is
@@ -333,8 +345,9 @@ directly.
   read; with `--log`, its fingerprints are logged with `handshake_error`. The fingerprint code handles such ClientHellos (FoxIO `ja4` reads them in full;
   tls.peet.ws-compatible values are empty, see
   [fingerprints.md](fingerprints.md#1-reading-the-clienthello)).
-- **One request per TCP connection.** HTTP/1.1 requests beyond 1024 bytes are truncated (the
-  report sees only the first 1024 bytes), keep-alive is not supported, and HTTP/2 answers only
+- **One request per TCP connection.** An HTTP/1.1 request head beyond 16 KiB is truncated (the
+  report sees only the first 16 KiB), a request body is not read, keep-alive is not
+  supported, and HTTP/2 answers only
   the first request: requests on other streams are not read, and the GOAWAY that follows the
   response names the answered stream, so a client knows it may send them again on a new
   connection (RFC 9113 section 6.8). A request with more than 64 KiB of input before its

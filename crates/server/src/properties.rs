@@ -22,7 +22,9 @@ const HELLOS: &str = include_str!("../../../corpus/hellos.jsonl");
 const READ_CHUNK: usize = 4096;
 
 fn runtime() -> Runtime {
+    // The handlers wait a moment for the client to close after they answered.
     Builder::new_current_thread()
+        .enable_time()
         .build()
         .expect("a current-thread runtime starts")
 }
@@ -224,8 +226,7 @@ fn serve(runtime: &Runtime, request: &[u8], tls: TlsDetails) -> Result<(), TestC
     if request.starts_with(b"HEAD ") && body.is_empty() {
         prop_assert!(length.is_some(), "HEAD keeps Content-Length");
     } else {
-        // Two CRLFs follow the body, past Content-Length.
-        prop_assert_eq!(length.map(|length| length + 4), Some(body.len()));
+        prop_assert_eq!(length, Some(body.len()));
     }
     // Nothing the client sent reaches the response head.
     prop_assert!(head.len() < 512, "response head of {} bytes", head.len());

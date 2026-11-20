@@ -99,11 +99,11 @@ fn get_with_status(
         .parse()
         .expect("numeric Content-Length");
     assert_eq!(
-        &body[length..],
-        "\r\n\r\n",
-        "two CRLFs follow the body, as on tls.peet.ws"
+        body.len(),
+        length,
+        "the response ends with the body (RFC 9112 section 6.2)"
     );
-    (hello, body[..length].to_owned())
+    (hello, body.to_owned())
 }
 
 #[test]
@@ -237,4 +237,94 @@ fn api_raw_returns_the_hello_as_sent() {
     let (message, body) = get(addr, roots, "/api/raw");
     let json: Value = serde_json::from_str(&body).expect("JSON body");
     assert_eq!(json["raw"], hex(&message));
+}
+
+/// Sends `request` as it is over HTTP/1.1 and returns the response's header block and body.
+fn send_raw(addr: SocketAddr, roots: RootCertStore, request: &[u8]) -> (String, String) {
+    let mut config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    let name = ServerName::try_from("localhost").expect("valid name");
+    let conn = ClientConnection::new(Arc::new(config), name).expect("client connection");
+    let mut tls = StreamOwned::new(conn, TcpStream::connect(addr).expect("connect"));
+    tls.write_all(request).expect("send request");
+    let mut response = Vec::new();
+    let _ = tls.read_to_end(&mut response);
+    let response = String::from_utf8(response).expect("UTF-8 response");
+    let (head, body) = response.split_once("\r\n\r\n").expect("header block");
+    (head.to_owned(), body.to_owned())
+}
+
+#[test]
+fn a_request_with_bare_lf_line_ends_is_answered_at_once() {
+    let (_runtime, addr, roots) = start();
+    let started = std::time::Instant::now();
+    let (head, body) = send_raw(
+        addr,
+        roots,
+        b"GET /api/all HTTP/1.1\nHost: localhost\nUser-Agent: lf/1\n\n",
+    );
+    // Not when the connection's 15 seconds run out, which is how long the client waited
+    // while only CRLF CRLF ended a request head.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "answered after {:?}",
+        started.elapsed()
+    );
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    let json: Value = serde_json::from_str(&body).expect("JSON body");
+    assert_eq!(json["user_agent"], "lf/1");
+    assert_eq!(
+        json["http1"]["headers"],
+        serde_json::json!(["Host: localhost", "User-Agent: lf/1"])
+    );
+}
+
+#[test]
+fn a_request_head_of_several_kilobytes_keeps_all_its_headers() {
+    let (_runtime, addr, roots) = start();
+    // A browser's request with cookies; only its first 1024 bytes used to be read.
+    let cookie = "c".repeat(6000);
+    let request = format!(
+        "GET /api/all HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nUser-Agent: it/1\r\nX-Last: yes\r\n\r\n"
+    );
+    let (head, body) = send_raw(addr, roots, request.as_bytes());
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    let json: Value = serde_json::from_str(&body).expect("JSON body");
+    let headers = json["http1"]["headers"].as_array().expect("headers");
+    assert_eq!(headers.len(), 4, "{headers:?}");
+    assert_eq!(headers[3], "X-Last: yes");
+    assert_eq!(json["user_agent"], "it/1");
+}
+
+#[test]
+fn a_request_head_over_the_limit_is_answered_from_what_was_read() {
+    let (_runtime, addr, roots) = start();
+    let cookie = "c".repeat(20_000);
+    let request = format!(
+        "GET /api/all HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nX-Last: yes\r\n\r\n"
+    );
+    let (head, body) = send_raw(addr, roots, request.as_bytes());
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    let json: Value = serde_json::from_str(&body).expect("JSON body");
+    let headers = json["http1"]["headers"].as_array().expect("headers");
+    // The 16 KiB that were read end inside the cookie.
+    assert_eq!(headers.len(), 2, "{} headers", headers.len());
+    assert_eq!(headers[0], "Host: localhost");
+}
+
+#[test]
+fn a_request_body_is_not_read_as_headers() {
+    let (_runtime, addr, roots) = start();
+    let (_, body) = send_raw(
+        addr,
+        roots,
+        b"POST /api/all HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n{\"a\": 1}",
+    );
+    let json: Value = serde_json::from_str(&body).expect("JSON body");
+    assert_eq!(
+        json["http1"]["headers"],
+        serde_json::json!(["Host: localhost", "Content-Length: 9"])
+    );
 }

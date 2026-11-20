@@ -275,10 +275,15 @@ Rules:
 
 ## 7. HTTP/1
 
-`http1.headers` holds every line of the request, in order, that contains a `:`, including the
-request line if it contains one (`GET /a:b HTTP/1.1`). The request is read until the header
-block ends or 1024 bytes have arrived, whichever is first; anything later is not seen. Invalid
-UTF-8 becomes one U+FFFD per byte.
+`http1.headers` holds the header lines of the request head, in order and as sent: every line
+after the request line and before the first empty line that contains a `:`. The request is
+read until that empty line or until 16 KiB have arrived, whichever is first; anything later is
+not seen, so the last header of a longer head is cut and the rest are missing. A line ends
+with CRLF or with a bare LF. Invalid UTF-8 becomes one U+FFFD per byte.
+
+tls.peet.ws reads 1024 bytes and lists every line in them that contains a `:`, so its list
+also has the request line when that contains one (`GET /a:b HTTP/1.1`) and lines of the
+request body, and lacks the headers past 1024 bytes. mirrust does not copy that.
 
 If the request line is not exactly three space-separated parts, `method`, `path` and
 `http_version` are `--` and `http1` is absent. `user_agent` is the last non-empty value of a line
