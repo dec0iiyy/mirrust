@@ -204,8 +204,11 @@ joined image, not the per-platform images.
 
 ### Updating the pins of the base images
 
-Move the tag and the digest of both `FROM` lines in `deploy/Dockerfile` together. A digest can
-be read from the registry without pulling anything:
+Dependabot (`.github/dependabot.yml`, ecosystem `docker`, directory `/deploy`) opens a pull
+request when a base image has a newer tag. Read it before merging: the tag and the digest of a
+`FROM` line must name the same image, and the Docker workflow must pass on the pull request.
+By hand, move the tag and the digest of both `FROM` lines in `deploy/Dockerfile` together. A
+digest can be read from the registry without pulling anything:
 
 ```console
 $ TOKEN=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/rust:pull" | jq -r .token)
