@@ -137,13 +137,17 @@ impl CertCache {
     }
 
     /// Saves the certificate issued for `names`. The key file is readable by the owner only.
-    /// The names go last, so a crash in between leaves a cache that is ignored, not a
-    /// mismatched one.
+    /// The names file of the previous certificate is removed first and written last, so a
+    /// crash in between leaves a cache that is ignored, not a new key next to an old chain.
     ///
     /// # Errors
     ///
     /// Fails when a file cannot be written.
     pub fn save_certificate(&self, names: &[String], cert: &StoredCert) -> io::Result<()> {
+        match fs::remove_file(self.dir.join(NAMES_FILE)) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
         write_private(&self.dir.join(KEY_FILE), &cert.key_pem)?;
         write_private(&self.dir.join(CHAIN_FILE), &cert.chain_pem)?;
         write_private(&self.dir.join(NAMES_FILE), &names_text(names))
@@ -192,7 +196,20 @@ fn write_private(path: &Path, text: &str) -> io::Result<()> {
     let mut file = create_private_file(&temporary)?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
-    fs::rename(&temporary, path)
+    fs::rename(&temporary, path)?;
+    sync_parent(path)
+}
+
+/// Flushes the directory of `path`, so that a rename in it survives a crash. Not possible on
+/// Windows, where opening a directory fails.
+fn sync_parent(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        File::open(dir)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn create_private_file(path: &Path) -> io::Result<File> {
@@ -258,6 +275,31 @@ mod tests {
                 .certificate(&names(&["a.example.com"]))
                 .expect("read")
                 .is_none()
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_save_that_fails_midway_leaves_no_names_so_the_old_files_are_ignored() {
+        let base = temp_base("midway");
+        let cache = CertCache::open(&base, CertificateAuthority::LetsEncrypt).expect("open");
+        let list = names(&["a.example.com"]);
+        let old = StoredCert {
+            chain_pem: "OLD CHAIN".into(),
+            key_pem: "OLD KEY".into(),
+        };
+        cache.save_certificate(&list, &old).expect("save");
+        // Writing the chain fails: a directory is in the way of the rename.
+        fs::remove_file(cache.dir().join(CHAIN_FILE)).expect("remove");
+        fs::create_dir(cache.dir().join(CHAIN_FILE)).expect("block");
+        let new = StoredCert {
+            chain_pem: "NEW CHAIN".into(),
+            key_pem: "NEW KEY".into(),
+        };
+        cache.save_certificate(&list, &new).expect_err("blocked");
+        assert!(
+            cache.certificate(&list).expect("read").is_none(),
+            "a new key next to an old chain must not be served"
         );
         let _ = fs::remove_dir_all(&base);
     }
