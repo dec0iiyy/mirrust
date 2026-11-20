@@ -1555,6 +1555,7 @@ dependencies = [
  "http",
  "http2",
  "http3",
+ "httpdate",
  "instant-acme",
  "proptest",
  "quic",

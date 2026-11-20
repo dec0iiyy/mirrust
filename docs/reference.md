@@ -284,7 +284,9 @@ status and for `OPTIONS` answers:
 | `Referrer-Policy` | `no-referrer` | Links on the page do not tell other sites where the visitor came from. |
 | `Vary` | `Accept` | `/` answers with the text report or the page by `Accept`, so a cache must not serve one for the other. It is on every response, because HTTP/2 sends these headers from one fixed list. |
 
-HTTP/1.1 and HTTP/2 connections are closed after one response. An HTTP/3 connection answers up
+HTTP/1.1 and HTTP/2 responses also carry a `Date` header (RFC 9110 section 6.6.1), taken when
+the answer is built; HTTP/3 responses do not have one yet. HTTP/1.1 connections are closed after one response
+and say so with `Connection: close`; HTTP/2 connections are too. An HTTP/3 connection answers up
 to 100 requests, one after another; then the server sends GOAWAY.
 
 ### `/api/all`

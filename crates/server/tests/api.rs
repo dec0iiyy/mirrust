@@ -83,6 +83,15 @@ fn get_with_status(
     ] {
         assert!(head.contains(&format!("\r\n{header}\r\n")), "{head}");
     }
+    let date = head
+        .lines()
+        .find_map(|line| line.strip_prefix("Date: "))
+        .expect("Date, which an origin server with a clock must send (RFC 9110 section 6.6.1)");
+    let sent = httpdate::parse_http_date(date).expect("an IMF-fixdate");
+    let age = std::time::SystemTime::now()
+        .duration_since(sent)
+        .unwrap_or_default();
+    assert!(age < std::time::Duration::from_secs(60), "{date}");
     let length: usize = head
         .lines()
         .find_map(|line| line.strip_prefix("Content-Length: "))

@@ -103,8 +103,9 @@ error, escaped and cut at 1024 characters. The text includes the causes of the e
 the parser's reason when the HTTP/2 exchange was rejected.
 
 Every response carries the headers in `routes::RESPONSE_HEADERS` (`Cache-Control: no-store`,
-`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Vary: Accept`). The HTTP/1.1 and HTTP/3
-handlers write them from that list; the HTTP/2 handler passes it to `http2::serve` as
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Vary: Accept`) and, on HTTP/1.1 and HTTP/2, a `Date` header (`routes::date`; the HTTP/2 handler takes it
+when the connection starts). The HTTP/1.1 and HTTP/3
+handlers write the fixed ones from that list; the HTTP/2 handler passes it to `http2::serve` as
 `extra_headers`, which also puts them on the `OPTIONS` answer and sends the names in lowercase.
 The `OPTIONS` answer is built by the HTTP/2 handler and passed to `http2::serve` as `options`
 (empty body, `text/plain; charset=utf-8`, the CORS headers, `Alt-Svc`), so it has the same

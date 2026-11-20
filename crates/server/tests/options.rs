@@ -63,6 +63,14 @@ fn options_http1(addr: SocketAddr, roots: RootCertStore) -> Headers {
     headers
 }
 
+/// Removes the `date` header, which differs by the second, after checking it is a valid date.
+fn without_date(mut headers: Headers) -> Headers {
+    let date = value(&headers, "date").expect("a Date header (RFC 9110 section 6.6.1)");
+    httpdate::parse_http_date(date).expect("an IMF-fixdate");
+    headers.retain(|(name, _)| name != "date");
+    headers
+}
+
 async fn options_http2(addr: SocketAddr, roots: RootCertStore) -> Headers {
     let socket = tokio::net::TcpStream::connect(addr).await.expect("connect");
     let name = ServerName::try_from("localhost").expect("valid name");
@@ -109,6 +117,7 @@ async fn options_has_the_same_headers_on_http1_and_http2() {
             .expect("HTTP/1.1 client")
     };
     let h2 = options_http2(addr, roots).await;
+    let (h1, h2) = (without_date(h1), without_date(h2));
 
     assert_eq!(
         value(&h2, "content-type"),
