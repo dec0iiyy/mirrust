@@ -91,7 +91,7 @@ mirrust's output. See [Compatibility with tls.peet.ws](#compatibility-with-tlspe
 
 ## Status
 
-This is version 0.1.4.
+This is version 0.1.5.
 
 Measured today: the TLS ClientHello over TCP and QUIC, the HTTP/1 request headers, the HTTP/2
 frames and Akamai fingerprint, the first flight of a QUIC connection, the HTTP/3 SETTINGS
@@ -113,7 +113,7 @@ loopback SYN through it, and one report from a server on the internet showed the
 check passing. Middleboxes and NAT change TTL, MSS and options on the way, so treat the TCP
 checks as unproven on real traffic.
 
-Tested: `cargo test --workspace` (349 tests) in CI on Ubuntu, macOS and Windows; clippy and
+Tested: `cargo test --workspace` (368 tests) in CI on Ubuntu, macOS and Windows; clippy and
 `cargo fmt --all --check` in CI on Ubuntu; `cargo check` of all targets with Rust 1.88, the
 minimum supported version, in CI on Ubuntu; and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
@@ -672,7 +672,7 @@ curl-impersonate and 24 captured from clients through the server. Tests check th
 Other tests cover the JA4 worked example from the FoxIO specification, the RFC 9001 Appendix A
 QUIC Initial, a recorded Chrome QUIC Initial split over two datagrams, and the server end to end
 over HTTP/1.1, HTTP/2 and HTTP/3 with an in-process client, including the connection limit,
-the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 349 tests.
+the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 368 tests.
 
 ## Compatibility with tls.peet.ws
 
