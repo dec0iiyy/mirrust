@@ -118,6 +118,9 @@ fn transport_config() -> io::Result<TransportConfig> {
         .max_concurrent_uni_streams(VarInt::from_u32(MAX_UNI_STREAMS))
         .stream_receive_window(VarInt::from_u32(STREAM_RECEIVE_WINDOW))
         .receive_window(VarInt::from_u32(CONNECTION_RECEIVE_WINDOW))
+        // Nothing here reads QUIC datagrams (RFC 9221). quinn would otherwise advertise them and
+        // buffer 1.25 MB of them per connection, which flow control does not limit.
+        .datagram_receive_buffer_size(None)
         .max_idle_timeout(Some(idle_timeout));
     Ok(transport)
 }

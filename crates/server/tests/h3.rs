@@ -394,3 +394,12 @@ async fn h3_json_api_ignores_accept() {
     let json: Value = serde_json::from_slice(&body).expect("JSON body");
     assert!(json["ja4"].as_str().is_some_and(|ja4| ja4.starts_with('q')));
 }
+
+#[tokio::test]
+async fn h3_does_not_accept_quic_datagrams() {
+    // DATAGRAM frames are not flow controlled; quinn buffers up to 1.25 MB of them per
+    // connection when it advertises `max_datagram_frame_size`, and nothing here reads them.
+    let (addr, roots) = start().await;
+    let (_endpoint, connection) = connect(addr, roots).await;
+    assert_eq!(connection.max_datagram_size(), None);
+}
