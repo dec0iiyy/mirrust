@@ -65,6 +65,7 @@ fn install_dry_run_prints_the_steps_and_the_unit() {
 }
 
 #[test]
+#[cfg(unix)] // Uses Unix paths; the install command is for Linux.
 fn install_dry_run_with_certificate_files_loads_them_as_credentials() {
     let output = mirrust(&[
         "install",
@@ -104,6 +105,7 @@ fn uninstall_dry_run_names_what_it_keeps() {
 }
 
 #[test]
+#[cfg(unix)] // Uses Unix paths; the install command is for Linux.
 fn install_refuses_flag_combinations_that_make_no_sense() {
     for (flags, message) in [
         (
