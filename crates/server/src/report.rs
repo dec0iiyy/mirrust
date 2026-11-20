@@ -100,6 +100,9 @@ pub(crate) struct Report {
     pub(crate) method: String,
     /// Left out of the JSON when empty.
     pub(crate) user_agent: String,
+    /// The request's `Accept` header values joined with `, `; empty when it has none. Not in the
+    /// JSON: the router reads it to choose between the page and the text report.
+    pub(crate) accept: String,
     pub(crate) tls: Option<TlsDetails>,
     /// HTTP/1 header lines in order; `None` leaves `http1` out of the JSON.
     pub(crate) http1_headers: Option<Vec<String>>,
@@ -156,7 +159,7 @@ impl Report {
 
     /// The `client` object: the known client the TLS fingerprint matches and whether the
     /// `User-Agent` agrees. mirrust's own field, not part of tls.peet.ws's layout.
-    fn client_json(&self) -> Value {
+    pub(crate) fn client_json(&self) -> Value {
         let known = self.tls.as_ref().map_or(Match::Unknown, |tls| tls.known);
         client_match::to_json(known, &self.user_agent)
     }
@@ -165,9 +168,14 @@ impl Report {
     /// with what the `User-Agent` claims, as a score and a list of checks. `null` without a
     /// captured ClientHello. mirrust's own field.
     fn audit_json(&self) -> Value {
-        let Some(tls) = &self.tls else {
-            return Value::Null;
-        };
+        self.audit().map_or(Value::Null, |audit| {
+            serde_json::to_value(audit).expect("an audit always serializes")
+        })
+    }
+
+    /// The audit of this connection; `None` without a captured ClientHello.
+    pub(crate) fn audit(&self) -> Option<audit::Audit> {
+        let tls = self.tls.as_ref()?;
         let hello = ClientHello::parse(&tls.raw);
         let mut input = audit::Input::new(&hello, &self.user_agent);
         input.known = tls.known;
@@ -180,7 +188,7 @@ impl Report {
             let request = frames.iter().rev().find(|f| f.frame_type == "HEADERS")?;
             Some(request.headers.as_slice())
         });
-        serde_json::to_value(audit::audit(&input)).expect("an audit always serializes")
+        Some(audit::audit(&input))
     }
 
     /// The fingerprints-only report (`/api/clean`). Without HTTP/2 the Akamai fields are `-`.

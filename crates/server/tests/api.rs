@@ -77,6 +77,7 @@ fn get_with_status(
         "Cache-Control: no-store",
         "X-Content-Type-Options: nosniff",
         "Referrer-Policy: no-referrer",
+        "Vary: Accept",
     ] {
         assert!(head.contains(&format!("\r\n{header}\r\n")), "{head}");
     }
@@ -107,9 +108,10 @@ fn unknown_paths_get_the_built_in_404_page() {
 }
 
 #[test]
-fn root_serves_the_page_with_the_report_inlined() {
+fn the_page_has_the_report_inlined() {
+    // The test client sends no `Accept`, which would get the text report.
     let (_runtime, addr, roots) = start();
-    let (_, body) = get(addr, roots, "/");
+    let (_, body) = get(addr, roots, "/?format=html");
     assert!(body.starts_with("<!doctype html>"), "{body}");
     assert!(!body.contains("null/*DATA*/"), "report was not inlined");
 }

@@ -25,6 +25,7 @@ mod report;
 mod request_log;
 mod routes;
 mod sniff;
+mod text;
 
 use std::io;
 use std::net::SocketAddr;
