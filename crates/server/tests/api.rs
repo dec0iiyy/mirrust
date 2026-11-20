@@ -331,20 +331,23 @@ fn a_request_body_is_not_read_as_headers() {
     );
 }
 
+/// The `tcp_os` check of an audit, if the audit has it: with a SYN it applies only when the
+/// `User-Agent` names an operating system.
+fn tcp_os_check(report: &Value) -> Option<&Value> {
+    report["audit"]["checks"]
+        .as_array()?
+        .iter()
+        .find(|check| check["id"] == "tcp_os")
+}
+
 #[test]
 fn tcpip_has_the_syn_where_the_kernel_keeps_it() {
     let (_runtime, addr, roots) = start();
-    let (_, body) = get(addr, roots, "/api/all");
+    let (_, body) = get(addr, roots.clone(), "/api/all");
     let json: Value = serde_json::from_str(&body).expect("JSON body");
     let tcpip = &json["tcpip"];
-    let checks = json["audit"]["checks"].as_array().expect("checks");
-    let tcp_os = checks
-        .iter()
-        .find(|check| check["id"] == "tcp_os")
-        .expect("the tcp_os check");
     if cfg!(target_os = "linux") {
         // Linux keeps the SYN of a connection for a listening socket with TCP_SAVE_SYN.
-        // This branch has run in CI only: the code was written on macOS.
         let syn = &tcpip["tcp_syn"];
         assert_eq!(syn["ip_version"], 4, "{tcpip}");
         assert_eq!(syn["src_ip"], "127.0.0.1");
@@ -359,9 +362,21 @@ fn tcpip_has_the_syn_where_the_kernel_keeps_it() {
                 .is_some_and(|p0f| p0f.starts_with("4:")),
             "{tcpip}"
         );
-        assert_ne!(tcp_os["status"], "skip", "{tcp_os}");
+        // The test client names no system, so the check has nothing to compare.
+        assert!(tcp_os_check(&json).is_none(), "{}", json["audit"]);
+
+        // A User-Agent that names Linux, over a connection that really came from Linux.
+        let (_, body) = send_raw(
+            addr,
+            roots,
+            b"GET /api/all HTTP/1.1\r\nHost: localhost\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64) Chrome/160.0.0.0\r\n\r\n",
+        );
+        let json: Value = serde_json::from_str(&body).expect("JSON body");
+        let check = tcp_os_check(&json).expect("the tcp_os check applies to a Linux User-Agent");
+        assert_eq!(check["status"], "pass", "{check}");
     } else {
         assert_eq!(tcpip, &serde_json::json!({ "ip": {}, "tcp": {} }));
-        assert_eq!(tcp_os["status"], "skip");
+        let check = tcp_os_check(&json).expect("the tcp_os check");
+        assert_eq!(check["status"], "skip");
     }
 }
