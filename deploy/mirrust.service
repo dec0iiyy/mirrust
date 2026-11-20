@@ -41,8 +41,13 @@ Type=exec
 ExecStart=/usr/local/bin/mirrust \
     --listen 0.0.0.0:443 \
     --domain mirror.example.com \
-    --acme-dir ${STATE_DIRECTORY} \
-    --log /var/log/mirrust/requests.jsonl
+    --acme-dir ${STATE_DIRECTORY}
+
+# No request log and no per-request line in the journal: the service keeps nothing about its
+# visitors, whose IP addresses are personal data in many countries. mirrust still prints
+# startup and error messages on stderr, which the journal keeps. To record requests, add
+# `--log /var/log/mirrust/requests.jsonl` to ExecStart= (`mirrust install --log ...` does).
+StandardOutput=null
 
 # Stop with SIGINT instead of the default SIGTERM: mirrust handles SIGINT (Ctrl-C) by
 # writing out the request log before it exits. systemd counts an exit on SIGINT as clean.

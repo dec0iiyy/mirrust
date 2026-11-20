@@ -354,13 +354,13 @@ directly.
 
 ## Known gaps
 
-- **SYN capture is for Linux and TCP only, and is proven on a loopback connection only.** The
+- **SYN capture is for Linux and TCP only, and is proven on a loopback connection in CI, plus one report from a server on the internet.** The
   code was written on macOS, where the socket options do not exist; its first build and run
   was CI's on Ubuntu (`tcpip_has_the_syn_where_the_kernel_keeps_it` in
   `crates/server/tests/api.rs`), which reads the SYN of a loopback connection, checks its
   fields and the `tcp_os` check with a Linux `User-Agent`. The kernel keeps only the SYNs
   that arrive after the option is set, so `keep_syn` runs right after the port is bound.
-  Until a report from a Linux server on the internet has been looked at, treat `tcpip.tcp_syn`,
+  Until more reports from real clients have been looked at, treat `tcpip.tcp_syn`,
   `p0f` and the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic (middleboxes
   and NAT change TTL, MSS and options on the way). What is known to be missing or different
   from a packet capture:

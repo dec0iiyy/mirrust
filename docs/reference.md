@@ -70,7 +70,7 @@ Flags, API, fields, the request log and the workspace. For the short version see
 
 On Linux, for TCP connections, it also reports the TCP SYN: the `tcp_syn` details and a p0f v3
 signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). A test in CI on
-Ubuntu reads a loopback SYN through this path; live traffic has not been checked yet, see
+Ubuntu reads a loopback SYN through this path; one live report from the internet showed the `tcp_mss` check passing, which is not yet a survey of real traffic, see
 [docs/architecture.md](architecture.md#known-gaps).
 
 The JSON layout follows tls.peet.ws, so tools written against that service can read
@@ -117,12 +117,10 @@ port 8443 and a self-signed certificate. It answered over HTTP/1.1, HTTP/2 (curl
 (Chrome), served 300 requests at 20 in parallel without an error, peaked at about 3.5 MB of
 memory, and stopped cleanly. See [deploy.md](deploy.md) for the details.
 
-Not run yet: port 443, IPv6, the firewall steps, the logrotate rules and the Docker image in
-`deploy/`. Also not run: the built-in ACME client (`--domain`) against Let's Encrypt, staging
-or production. Its flags, the validation connection, the certificate resolver, the cache and
-the retry timing are tested; the exchange with the CA, which the `instant-acme` library
-performs, is not, and nor is the current `deploy/mirrust.service` with `StateDirectory=` on a
-server. Treat those instructions as written but unverified.
+The built-in ACME client (`--domain auto`, TLS-ALPN-01 on port 443) has obtained a certificate
+from Let's Encrypt, staging and then production, on an Ubuntu 24.04 server, installed with
+`mirrust install` and the current `deploy/mirrust.service`. Not run yet: IPv6, the logrotate
+rules, the Docker image's HTTP/3, and renewal, which happens about 30 days before expiry.
 
 The dataset behind the `client` field has 31 entries, so a real client often gets `ciphers`
 or `none`; see [docs/fingerprints.md](fingerprints.md#12-known-clients-client).
@@ -171,7 +169,7 @@ any system. The first argument must be `install` or `uninstall`, and each takes 
 | `--cert PEM`, `--key PEM` | none | Certificate chain and key, as absolute paths, given together. The unit loads them with `LoadCredential=`, so a renewed certificate needs a restart. |
 | `--acme-email ADDR` | none | As for the server. Needs `--domain`. |
 | `--acme-staging` | off | As for the server. Takes no value. Needs `--domain`. |
-| `--log PATH` | `/var/log/mirrust/requests.jsonl` | Request log. Must be a file inside `/var/log/mirrust`. |
+| `--log PATH` | no log | Request log. Must be a file inside `/var/log/mirrust`. Without it the unit stores nothing about visitors. |
 | `--max-connections N` | mirrust's own default, `1024` | As for the server; at least 1. |
 | `--dry-run` | off | Print each step and, for `install`, the unit text; change nothing. Takes no value. |
 | `-h`, `--help` | | Print the usage of `install` and `uninstall`. |

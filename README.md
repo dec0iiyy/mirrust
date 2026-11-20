@@ -39,7 +39,8 @@ missing browser headers behind it.
 | **The fingerprints people use** | JA4 per the FoxIO specification (with `_o`, `_r` and `_ro`), JA3, PeetPrint and the Akamai HTTP/2 string, in the JSON layout of tls.peet.ws, plus an HTTP/3 fingerprint of its own. |
 | **Knows real clients** | A dataset of 31 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, rustls and okhttp. |
 | **Small and self-contained** | One binary of about 5 MB that idles at about 6 MB of memory. No database, no runtime to install. |
-| **Made for the open internet** | A connection limit, bounded memory per client, property-tested parsers, no `unsafe` code, and a JSON Lines request log. |
+| **Made for the open internet** | A connection limit, bounded memory per client, property-tested parsers, no `unsafe` code, and an optional JSON Lines request log. |
+| **Keeps nothing about you** | The installed service writes no request log and nothing per request to the journal. A visitor's IP address lives in memory while the page is built. |
 
 It is for people who build or test HTTP clients and browser-impersonation libraries, run
 anti-bot or anti-fraud defences, or need to see exactly what a client sends.
@@ -152,8 +153,8 @@ $ docker run -d --name mirrust --restart unless-stopped -p 443:443/tcp -p 443:44
 To do it by hand (download without the script, your own unit, certificate files from certbot,
 log rotation), follow [docs/deploy.md](docs/deploy.md); for Docker Compose and the image,
 [docs/docker.md](docs/docker.md). `deploy/cloud-init.yaml` is an untested cloud-config for a
-fresh VPS. Not run yet: issuance against the real Let's Encrypt, and `mirrust install` on a
-machine with systemd (its dry run and its parts are tested; see
+fresh VPS. `mirrust install` and the built-in ACME client have run on an Ubuntu 24.04 server on
+the internet, with the Let's Encrypt staging CA and then production (see
 [docs/deploy.md](docs/deploy.md#install-with-mirrust-install)).
 
 ## Documentation
@@ -169,12 +170,12 @@ Version 0.1.3. 349 tests, run on Ubuntu, macOS and Windows in CI. The release bi
 in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container image is built
 and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
 unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with
-Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client against Let's Encrypt (its
-exchange is tested against a fake CA in the test suite only), `mirrust install` on a systemd
-machine, log rotation and HTTP/3 in the container. On Linux the server takes each connection's
-TCP SYN from the kernel for the TCP checks of the `audit`; a test on Ubuntu in CI reads a
-loopback SYN and the `tcp_os` check passes, but no report from a server on the internet has
-been looked at yet. On macOS and Windows the TCP checks show as not measured.
+Chrome, HTTP/3. Since then it has also run on port 443 of an Ubuntu 24.04 server on the
+internet, installed with `mirrust install`, with a Let's Encrypt certificate it obtained itself,
+and answered over HTTP/1.1 and HTTP/2. Not run yet: IPv6, log rotation, HTTP/3 against that
+server and HTTP/3 in the container. On Linux the server takes each connection's TCP SYN from
+the kernel for the TCP checks of the `audit`; a test on Ubuntu in CI reads a loopback SYN, and
+one report from the internet showed the MSS check passing, but that is a single look. On macOS and Windows the TCP checks show as not measured.
 Details are in [Reference](docs/reference.md#status).
 
 ## License

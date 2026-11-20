@@ -55,7 +55,7 @@ fn install_dry_run_prints_the_steps_and_the_unit() {
         "run: systemctl daemon-reload",
         "run: systemctl enable mirrust.service",
         "run: systemctl restart mirrust.service",
-        "ExecStart=/usr/local/bin/mirrust \\\n    --listen 0.0.0.0:443 \\\n    --domain mirror.example.com \\\n    --acme-dir ${STATE_DIRECTORY} \\\n    --acme-email admin@example.com \\\n    --log /var/log/mirrust/requests.jsonl \\\n    --max-connections 2048\n",
+        "ExecStart=/usr/local/bin/mirrust \\\n    --listen 0.0.0.0:443 \\\n    --domain mirror.example.com \\\n    --acme-dir ${STATE_DIRECTORY} \\\n    --acme-email admin@example.com \\\n    --max-connections 2048\n",
         "[Install]\nWantedBy=multi-user.target\n",
     ] {
         assert!(text.contains(expected), "missing {expected:?} in\n{text}");

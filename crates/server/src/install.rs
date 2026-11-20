@@ -40,8 +40,9 @@ with other flags to rewrite the unit and restart the service.
                      reads at start (LoadCredential=); a renewed certificate needs a restart
   --acme-email       contact address for Let's Encrypt (needs --domain)
   --acme-staging     use the Let's Encrypt staging CA (needs --domain)
-  --log              request log, a file inside /var/log/mirrust
-                     (default /var/log/mirrust/requests.jsonl)
+  --log              write a request log, a file inside /var/log/mirrust, for example
+                     /var/log/mirrust/requests.jsonl. Without it nothing about visitors is
+                     stored: no log file, and the per-request line stays out of the journal
   --max-connections  connections open at once (default: mirrust's own, 1024)
   --dry-run          print every step and the unit text, change nothing; works as any user
                      on any system
@@ -60,8 +61,6 @@ const SYSTEMD_RUNTIME_DIR: &str = "/run/systemd/system";
 /// The directory the unit's `LogsDirectory=` creates and the only place the sandbox lets the
 /// service write a request log.
 const LOG_DIR: &str = "/var/log/mirrust";
-/// The request log when `--log` is not given: the one in the unit template.
-const DEFAULT_LOG: &str = "/var/log/mirrust/requests.jsonl";
 /// The address and port the unit passes to `--listen`.
 const LISTEN: &str = "0.0.0.0:443";
 /// The unit template, the same file that docs/deploy.md describes.
@@ -109,7 +108,7 @@ pub(crate) struct Uninstall {
 #[derive(Debug, PartialEq, Eq)]
 struct Serving {
     certificate: Certificate,
-    log: String,
+    log: Option<String>,
     max_connections: Option<usize>,
 }
 
@@ -229,7 +228,7 @@ fn parse_install(args: impl IntoIterator<Item = String>) -> anyhow::Result<Reque
     Ok(Request::Install(Install {
         serving: Serving {
             certificate,
-            log: log.unwrap_or_else(|| DEFAULT_LOG.to_owned()),
+            log,
             max_connections,
         },
         mode,
@@ -295,7 +294,7 @@ fn log_path(value: &str) -> anyhow::Result<String> {
     ensure!(
         inside,
         "bad --log {value}: the unit lets the service write only below {LOG_DIR}, so give a \
-         file there such as {DEFAULT_LOG}"
+         file there such as {LOG_DIR}/requests.jsonl"
     );
     unit_word(value, "--log")
 }
@@ -323,7 +322,7 @@ fn exec_start(serving: &Serving) -> Vec<String> {
             args.push("--key ${CREDENTIALS_DIRECTORY}/key.pem".to_owned());
         }
     }
-    args.push(format!("--log {}", serving.log));
+    args.extend(serving.log.iter().map(|log| format!("--log {log}")));
     args.extend(
         serving
             .max_connections
@@ -589,10 +588,12 @@ fn run_install(install: &Install) -> anyhow::Result<()> {
     let state = wait_until_active();
     println!("mirrust.service is {state}");
     println!("  installed: {BINARY_PATH}, {UNIT_PATH}");
-    println!(
-        "  log:       journalctl -u mirrust -f   (request log: {})",
-        install.serving.log
-    );
+    match &install.serving.log {
+        Some(log) => println!("  log:       journalctl -u mirrust -f   (request log: {log})"),
+        None => println!(
+            "  log:       journalctl -u mirrust -f   (no request log: visitors are not recorded)"
+        ),
+    }
     println!("  firewall:  open TCP 443 and UDP 443 (UDP carries HTTP/3); this command changed no");
     println!(
         "             firewall rule, for example: sudo ufw allow 443/tcp && sudo ufw allow 443/udp"
@@ -875,8 +876,9 @@ mod tests {
         assert_eq!(
             exec_block(&unit),
             "ExecStart=/usr/local/bin/mirrust --listen 0.0.0.0:443 --domain mirror.example.com \
-             --acme-dir ${STATE_DIRECTORY} --log /var/log/mirrust/requests.jsonl"
+             --acme-dir ${STATE_DIRECTORY}"
         );
+        assert!(unit.contains("StandardOutput=null"), "{unit}");
         assert!(!unit.contains("LoadCredential="), "{unit}");
     }
 
@@ -947,8 +949,7 @@ mod tests {
         assert_eq!(
             exec_block(&unit),
             "ExecStart=/usr/local/bin/mirrust --listen 0.0.0.0:443 \
-             --cert ${CREDENTIALS_DIRECTORY}/cert.pem --key ${CREDENTIALS_DIRECTORY}/key.pem \
-             --log /var/log/mirrust/requests.jsonl"
+             --cert ${CREDENTIALS_DIRECTORY}/cert.pem --key ${CREDENTIALS_DIRECTORY}/key.pem"
         );
         let lines: Vec<&str> = unit.lines().collect();
         let service = lines

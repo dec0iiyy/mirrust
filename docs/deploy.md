@@ -107,7 +107,7 @@ Agreement. It does not open the firewall: do that as in [step 2](#2-open-the-fir
 | `--cert PEM`, `--key PEM` | Use these files instead, as in [Alternative: certificate files](#alternative-certificate-files): absolute paths, given together, copied for the service by `LoadCredential=` at each start. They conflict with `--domain`. One of the two kinds is required. |
 | `--acme-email ADDR` | Contact address for Let's Encrypt. Needs `--domain`. |
 | `--acme-staging` | Use the staging CA. Needs `--domain`. |
-| `--log PATH` | Request log. Default `/var/log/mirrust/requests.jsonl`. It must be a file inside `/var/log/mirrust`, the only place the unit's sandbox lets the service write. |
+| `--log PATH` | Write a request log. Off by default: without it no log file is written and the journal gets no per-request line, so nothing about visitors is stored. It must be a file inside `/var/log/mirrust`, the only place the unit's sandbox lets the service write, for example `/var/log/mirrust/requests.jsonl`. |
 | `--max-connections N` | Written as `--max-connections N`; without it mirrust's default (1024) applies. |
 | `--dry-run` | Print every step and the unit text, change nothing. Works as any user on any system. |
 
@@ -367,8 +367,9 @@ $ journalctl -u mirrust.service -n 20
 What the unit does, in short (every line is commented in the file):
 
 - Runs `/usr/local/bin/mirrust --listen 0.0.0.0:443 --domain YOUR.HOST.NAME --acme-dir
-  ${STATE_DIRECTORY} --log /var/log/mirrust/requests.jsonl`. Add `--acme-email` and, for a first
-  try, `--acme-staging` to the `ExecStart=` line.
+  ${STATE_DIRECTORY}`, with `StandardOutput=null`, so that neither a request log nor a per-request
+  line in the journal records visitors. Add `--acme-email` and, for a first try, `--acme-staging`
+  to the `ExecStart=` line, and `--log /var/log/mirrust/requests.jsonl` if you want a request log.
 - Runs as a dynamic user that exists only while the service runs, with
   `CAP_NET_BIND_SERVICE` as its only capability, so it can bind TCP 443 and UDP 443 and nothing
   else that needs privileges.
@@ -400,14 +401,10 @@ HTTP/3.
 
 ### Output in the journal
 
-Besides the request log, mirrust prints one line per request on stdout, and the journal
-stores it. To keep only stderr in the journal, add a drop-in with `sudo systemctl edit
-mirrust.service`:
-
-```ini
-[Service]
-StandardOutput=null
-```
+mirrust prints one line per request on stdout, with the client's IP address. The unit sets
+`StandardOutput=null`, so the journal keeps only stderr: startup and error messages. To see the
+per-request lines while you debug, run `sudo systemctl edit mirrust.service` and add
+`[Service]` with `StandardOutput=journal`, and remove the drop-in when you are done.
 
 ## 5. Verify
 
@@ -446,7 +443,8 @@ It should list one `tcp` and one `udp` socket owned by `mirrust`.
 
 ## 6. Rotate the request log
 
-The unit writes the request log to `/var/log/mirrust/requests.jsonl`, one JSON object per
+This applies only if you started the service with `--log`. The request log, for example
+`/var/log/mirrust/requests.jsonl`, has one JSON object per
 line (see "Request log" in the [Reference](reference.md#request-log)). With the unit's dynamic user
 the real location is `/var/log/private/mirrust/`, and `/var/log/mirrust` is a symbolic
 link to it; read the log as root.
@@ -562,8 +560,7 @@ lines. `StateDirectory=` is not needed any more and can stay or go:
 ExecStart=/usr/local/bin/mirrust \
     --listen 0.0.0.0:443 \
     --cert ${CREDENTIALS_DIRECTORY}/cert.pem \
-    --key ${CREDENTIALS_DIRECTORY}/key.pem \
-    --log /var/log/mirrust/requests.jsonl
+    --key ${CREDENTIALS_DIRECTORY}/key.pem
 
 LoadCredential=cert.pem:/etc/letsencrypt/live/mirror.example.com/fullchain.pem
 LoadCredential=key.pem:/etc/letsencrypt/live/mirror.example.com/privkey.pem
