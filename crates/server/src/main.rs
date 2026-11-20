@@ -19,13 +19,21 @@ use server::{
 };
 use tokio::net::TcpListener;
 
+mod install;
+
 const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
                   [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
                   [--cors-key KEY] [--log PATH] [--max-connections N]
+       mirrust install (--domain NAME ... | --cert PEM --key PEM) [--dry-run] ...
+       mirrust uninstall [--dry-run]
        mirrust --version
 
   -h, --help         print this text and exit
   -V, --version      print the version and exit
+
+install sets mirrust up as a systemd service (Linux, as root) and uninstall removes it; see
+mirrust install --help for their flags.
+
   --listen           address to listen on, TCP and UDP for HTTP/3 (default 127.0.0.1:8443,
                      0.0.0.0:443 with --domain)
   --cert/--key       PEM certificate chain and private key; without them, and without
@@ -83,6 +91,8 @@ enum Command {
     Run(Box<Args>),
     Help,
     Version,
+    /// `install` or `uninstall`, with their own flags.
+    Manage(install::Request),
 }
 
 /// The text `--version` prints.
@@ -100,7 +110,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command>
     let mut acme_email = None;
     let mut acme_staging = false;
     let mut config = Config::default();
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().peekable();
+    if let Some(name) = args.next_if(|arg| matches!(arg.as_str(), "install" | "uninstall")) {
+        return install::parse(&name, args).map(Command::Manage);
+    }
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "-h" | "--help" => return Ok(Command::Help),
@@ -281,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", version_line());
             return Ok(());
         }
+        Command::Manage(request) => return install::run(request),
         Command::Run(args) => *args,
     };
     let acme = args.acme.take().map(prepare_acme).transpose()?;
@@ -370,6 +384,7 @@ mod tests {
             Command::Run(args) => Ok(*args),
             Command::Help => bail!("help"),
             Command::Version => bail!("version"),
+            Command::Manage(_) => bail!("install or uninstall"),
         }
     }
 

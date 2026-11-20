@@ -35,6 +35,7 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY corpus/clients.jsonl ./corpus/clients.jsonl
+COPY deploy/mirrust.service ./deploy/mirrust.service
 RUN cargo build --release --locked --bin mirrust --target "$(cat /rust-target)" \
     && install -D -m 0555 "target/$(cat /rust-target)/release/mirrust" /out/mirrust
 # The state directory, empty, for the final image to copy with its owner set.
