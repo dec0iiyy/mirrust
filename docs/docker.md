@@ -4,11 +4,11 @@ mirrust is published as a small container image, `ghcr.io/dec0iiyy/mirrust`, for
 and `linux/arm64`. It holds one static binary and runs as a non-root user with no
 capabilities.
 
-> **Status: nothing in this file has been run.** The Dockerfile, the compose file and the
-> workflow were written on a machine without Docker. They were checked by reading, by
-> `actionlint` and by looking up the base images in the registries, nothing more. The
-> [Status](#status) section at the end lists what is untested. Treat every command here as
-> unverified until the `Docker` workflow has run once on GitHub and passed.
+> **Status: the image is built, smoke-tested and published by the `Docker` workflow; the
+> commands in this file were written on a machine without Docker and have not been run by
+> hand.** The workflow ran `docker run` with the options below on both platforms and passed on
+> `main` and on the tag v0.1.1. The [Status](#status) section at the end lists what is still
+> untested.
 
 ## Run it with `docker run`
 
@@ -266,6 +266,9 @@ Not run:
 - HTTP/3 in the container (the runner's curl has no HTTP/3), and a browser against it.
 - `--domain` in a container, against Let's Encrypt staging or production.
 - `deploy/compose.yaml`: Docker Compose has not parsed it, only a YAML parser has.
-- The publish and merge jobs, the `gh attestation verify` command, the tags and the `latest`
-  rule. The package may be private after its first publish: check its visibility in the GitHub
-  package settings.
+- The tag rule for a pre-release (`v1.2.3-rc.1` gets only its own tag): no pre-release has been
+  published.
+
+Seen on 2026-11-20, after the v0.1.1 release: the publish and merge jobs passed; the package is
+public (an anonymous token lists its tags: `0.1.0`, `0.1`, `0.1.1` and `latest`); and
+`gh attestation verify oci://ghcr.io/dec0iiyy/mirrust:0.1.1 --repo dec0iiyy/mirrust` exits 0.

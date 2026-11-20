@@ -15,8 +15,12 @@ Description=mirrust, an HTTPS server that reports the client's TLS and HTTP fing
 # Start once addresses are configured, so that a --listen with a specific address can bind.
 Wants=network-online.target
 After=network-online.target
-# No start rate limit: with Restart= below, a failing service is started again every five
-# seconds for as long as it fails, instead of being given up on after a few attempts.
+# No start rate limit. A failing service is started again every five seconds (Restart= and
+# RestartSec= below) for as long as it fails, and nothing here gives up. The default limit, 5
+# starts in 10 seconds, would not stop that either with a 5 second delay; this line keeps it
+# that way if a drop-in shortens RestartSec=. RestartSteps= and RestartMaxDelaySec= would give
+# a growing delay, but they need systemd 254 (Debian 12 has 252, and older systemd ignores
+# unknown directives with a warning), so they are not used.
 StartLimitIntervalSec=0
 
 [Service]

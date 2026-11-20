@@ -50,8 +50,8 @@ $ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/instal
 $ sudo mirrust install --domain mirror.example.com
 ```
 
-`install.sh` is a release file of the first release after 0.1.0, and is in the repository's
-root before that. It detects the system with `uname`, downloads the binary and `SHA256SUMS`
+`install.sh` is a release file from 0.1.1 on (0.1.0 does not have it), and is in the
+repository's root. It detects the system with `uname`, downloads the binary and `SHA256SUMS`
 with curl (or wget) into a temporary directory, checks the SHA-256 before it installs
 anything, runs `gh attestation verify` as well when `gh` is installed (and only reports the
 result), and installs `/usr/local/bin/mirrust` with mode 0755. If that directory is not
