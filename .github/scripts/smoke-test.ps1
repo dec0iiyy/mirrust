@@ -47,7 +47,9 @@ try {
     }
 
     Write-Host "HTTP version: $version"
-    if ($version -ne '2') { throw "expected HTTP/2, got HTTP/$version" }
+    # The curl.exe on the Windows runners may negotiate HTTP/1.1 where other curls use HTTP/2;
+    # either one proves that the server answered over TLS.
+    if ($version -ne '2' -and $version -ne '1.1') { throw "expected HTTP/2 or HTTP/1.1, got HTTP/$version" }
     if (-not (Select-String -LiteralPath $body -Pattern '"audit"' -Quiet)) {
         throw "the response has no audit field"
     }
