@@ -264,10 +264,14 @@ async fn respond(
         .send_response(response)
         .await
         .context("sending the response head")?;
-    stream
-        .send_data(Bytes::from(body))
-        .await
-        .context("sending the body")?;
+    // The headers of a HEAD response are those of the GET, but it carries no content
+    // (RFC 9110 section 9.3.2).
+    if request.method() != http::Method::HEAD {
+        stream
+            .send_data(Bytes::from(body))
+            .await
+            .context("sending the body")?;
+    }
     stream.finish().await.context("finishing the stream")?;
     Ok(())
 }
