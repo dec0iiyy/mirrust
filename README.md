@@ -34,7 +34,8 @@ anti-bot or anti-fraud defences, or need to see exactly what a client sends.
 
 ## Run it
 
-Needs Rust 1.88 or later.
+Download the binary for your system from [Releases](https://github.com/dec0iiyy/mirrust/releases)
+(Linux x86_64 and arm64, macOS, Windows), or build it with Rust 1.88 or later:
 
 ```console
 $ cargo build --release
@@ -98,16 +99,24 @@ default, so a pipe or a file stays clean).
 On a Linux server with a DNS `A` record for your host name pointing at it:
 
 ```console
-$ cargo build --release && sudo install target/release/mirrust /usr/local/bin/
-$ sudo mirrust --domain mirror.example.com
+$ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/mirrust-linux-x86_64 -o mirrust
+$ chmod +x mirrust && sudo ./mirrust --domain mirror.example.com
+```
+
+On arm64, download `mirrust-linux-aarch64`. Or in Docker:
+
+```console
+$ docker run -d --name mirrust --restart unless-stopped -p 443:443/tcp -p 443:443/udp \
+    --sysctl net.ipv4.ip_unprivileged_port_start=0 -v mirrust-data:/data \
+    ghcr.io/dec0iiyy/mirrust --domain mirror.example.com --acme-dir /data/acme
 ```
 
 mirrust gets a Let's Encrypt certificate for that name by itself (TLS-ALPN-01 on port 443, so
 no port 80) and renews it; `--domain` means you accept the Let's Encrypt Subscriber Agreement.
 Open TCP and UDP port 443 and nothing else: UDP carries HTTP/3. Issuance against the real
 Let's Encrypt has not been run yet; try `--acme-staging` first. For a sandboxed systemd
-service, certificate files from certbot instead, log rotation and Docker, follow
-[docs/deploy.md](docs/deploy.md).
+service, certificate files from certbot instead and log rotation, follow
+[docs/deploy.md](docs/deploy.md); for Docker Compose and the image, [docs/docker.md](docs/docker.md).
 
 ## Documentation
 
@@ -118,11 +127,14 @@ service, certificate files from certbot instead, log rotation and Docker, follow
 
 ## Status
 
-Version 0.1.0. 247 tests, run on Ubuntu and macOS in CI. The release binary built in CI has run
-under the sandboxed systemd unit on an Ubuntu 24.04 server, on port 8443, and answered over
-HTTP/1.1, HTTP/2 and, with Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client
-against Let's Encrypt (its CA exchange has no test), log rotation and the Docker image. The server does not capture TCP SYN packets yet, so the TCP checks show as
-not measured. Details are in [Reference](docs/reference.md#status).
+Version 0.1.0. 247 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
+in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container image is built
+and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
+unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with
+Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client against Let's Encrypt (its CA
+exchange has no test), log rotation and HTTP/3 in the container. The server does not capture TCP
+SYN packets yet, so the TCP checks show as not measured. Details are in
+[Reference](docs/reference.md#status).
 
 ## License
 
