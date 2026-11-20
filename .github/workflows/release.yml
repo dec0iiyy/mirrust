@@ -154,10 +154,18 @@ jobs:
       - name: Use the prebuilt NASM objects of aws-lc-sys
         if: matrix.windows
         run: echo "AWS_LC_SYS_PREBUILT_NASM=1" >> "$GITHUB_ENV"
+      # Panic messages and debug assertions embed the path of the source file. Without the
+      # remapping, the home directory of the runner ends up in the binary
+      # (/home/runner/.cargo/registry/src/...). CARGO_HOME is where cargo unpacks the crates;
+      # USERPROFILE is the native form of the home directory in Git for Windows' bash.
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo build --release --locked --bin mirrust --target "$TARGET"
+        run: |
+          set -euo pipefail
+          cargo_home="${CARGO_HOME:-${USERPROFILE:-$HOME}/.cargo}"
+          export RUSTFLAGS="--remap-path-prefix=$cargo_home=/cargo"
+          cargo build --release --locked --bin mirrust --target "$TARGET"
       # A binary that is not static would fail on a distribution without the right glibc,
       # and the smoke test below runs in containers that have one.
       - name: Check that the binary is static
@@ -196,7 +204,8 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: ./.github/scripts/smoke-test.ps1 -Binary "target/$env:TARGET/release/mirrust.exe"
-      # mirrust-<tag>-<target>.tar.gz holds the binary, the licence files, the README and the
+      # mirrust-<tag>-<target>.tar.gz holds the binary, the licence files (LICENSE, NOTICE and
+      # THIRD-PARTY-LICENSES.md, the texts of the crates linked in), the README and the
       # systemd unit; the bare binary is copied next to it under its short name. Written for
       # GNU tar (Linux) and bsdtar (macOS): both take the same flags below except the owner.
       - name: Package
@@ -211,7 +220,7 @@ jobs:
           name="mirrust-$TAG-$TARGET"
           bin="target/$TARGET/release/mirrust"
           mkdir -p "dist/$name/deploy"
-          cp "$bin" LICENSE NOTICE README.md "dist/$name/"
+          cp "$bin" LICENSE NOTICE THIRD-PARTY-LICENSES.md README.md "dist/$name/"
           cp deploy/mirrust.service "dist/$name/deploy/"
           chmod 755 "dist/$name/mirrust"
           if [ "$RUNNER_OS" = Linux ]; then
@@ -225,7 +234,8 @@ jobs:
           chmod 755 "dist/$ASSET"
           tar -tzvf "dist/$name.tar.gz"
           ls -l dist
-      # Windows: mirrust-<tag>-<target>.zip with mirrust.exe, LICENSE, NOTICE and README.md,
+      # Windows: mirrust-<tag>-<target>.zip with mirrust.exe, LICENSE, NOTICE,
+      # THIRD-PARTY-LICENSES.md and README.md,
       # without the systemd unit, and the bare mirrust-windows-x86_64.exe. 7-Zip is on the
       # runner image.
       - name: Package (Windows)
@@ -239,7 +249,7 @@ jobs:
           name="mirrust-$TAG-$TARGET"
           bin="target/$TARGET/release/mirrust.exe"
           mkdir -p "dist/$name"
-          cp "$bin" LICENSE NOTICE README.md "dist/$name/"
+          cp "$bin" LICENSE NOTICE THIRD-PARTY-LICENSES.md README.md "dist/$name/"
           (cd dist && 7z a -tzip "$name.zip" "$name")
           rm -r "dist/$name"
           cp "$bin" "dist/$ASSET"
@@ -335,7 +345,7 @@ jobs:
           $ gh attestation verify mirrust-linux-x86_64 --repo $GH_REPO
           \`\`\`
 
-          The bare binaries need \`chmod +x\` after the download. The \`.tar.gz\` archives hold the binary, \`LICENSE\`, \`NOTICE\`, \`README.md\` and \`deploy/mirrust.service\`; the Windows \`.zip\` holds \`mirrust.exe\`, \`LICENSE\`, \`NOTICE\` and \`README.md\`. The Windows build is for local testing.
+          The bare binaries need \`chmod +x\` after the download. The \`.tar.gz\` archives hold the binary, \`LICENSE\`, \`NOTICE\`, \`THIRD-PARTY-LICENSES.md\`, \`README.md\` and \`deploy/mirrust.service\`; the Windows \`.zip\` holds \`mirrust.exe\`, \`LICENSE\`, \`NOTICE\`, \`THIRD-PARTY-LICENSES.md\` and \`README.md\`. The Windows build is for local testing.
           EOF
           gh release create "$TAG" --verify-tag --generate-notes --notes-file notes.md \
             --prerelease="$prerelease" dist/*

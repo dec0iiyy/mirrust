@@ -1,0 +1,58 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+#
+#   cargo deny check
+#
+# Not run by CI. The keys follow the current documentation (the 0.18 series): `version` and
+# the removed `vulnerability`, `notice`, `unlicensed`, `copyleft` and `deny` licence keys are
+# left out on purpose.
+
+[graph]
+# The five targets of .github/workflows/release.yml. Without this, cargo-deny also walks
+# target-specific dependencies that no release build compiles, such as `ring`, which
+# quinn-proto pulls in on wasm32-unknown-unknown only.
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+# A yanked version is a version its author withdrew; fail on it.
+yanked = "deny"
+# Fail on RustSec "unmaintained" notices for any crate in the graph, direct or transitive.
+unmaintained = "all"
+# Add an entry here, with a reason and an expiry, only for an advisory that was reviewed and
+# does not reach our code:
+#   ignore = [{ id = "RUSTSEC-0000-0000", reason = "...", expiry = "2027-01-31" }]
+ignore = []
+
+[licenses]
+# Permissive licences only. The workspace crates are GPL-3.0-only and unpublished; that is
+# what `private` skips. A dependency under any other licence fails the check.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+# Two versions of one crate are a cost (compile time, binary size), not an error.
+multiple-versions = "warn"
+# `fingerprint = { path = "../fingerprint" }` has no version requirement; that is allowed for
+# unpublished workspace crates only.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# crates.io only: no git dependencies, no other registry.
+unknown-registry = "deny"
+unknown-git = "deny"
