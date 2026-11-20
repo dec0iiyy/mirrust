@@ -757,7 +757,8 @@ fn wait_until_active() -> String {
     }
 }
 
-#[cfg(test)]
+// The install command is for Linux with systemd; its tests use Unix paths and are skipped elsewhere.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
