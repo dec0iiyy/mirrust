@@ -165,6 +165,7 @@ where
             request.stream_id,
             &response,
             extra_headers,
+            request.method == "HEAD",
         ))
         .await?;
     stream.flush().await?;
@@ -203,7 +204,14 @@ fn settings_frame() -> Vec<u8> {
     out
 }
 
-fn response_frames(stream_id: u32, response: &Response, extra_headers: &[(&str, &str)]) -> Vec<u8> {
+/// HEADERS, DATA and GOAWAY for `response`. A response to HEAD has no DATA frames, though its
+/// `content-length` is that of the body (RFC 9110 section 9.3.2, RFC 9113 section 8.1.1).
+fn response_frames(
+    stream_id: u32,
+    response: &Response,
+    extra_headers: &[(&str, &str)],
+    head: bool,
+) -> Vec<u8> {
     let length = response.body.len().to_string();
     let status = response.status.to_string();
     let extra_names: Vec<String> = extra_headers
@@ -235,11 +243,16 @@ fn response_frames(stream_id: u32, response: &Response, extra_headers: &[(&str, 
     let block = Encoder::new().encode(fields);
 
     let mut out = Vec::with_capacity(block.len() + response.body.len() + 64);
-    push_frame(&mut out, 0x1, 0x4, stream_id, &block);
-    for chunk in response.body.chunks(DATA_CHUNK) {
-        push_frame(&mut out, 0x0, 0, stream_id, chunk);
+    if head {
+        // END_HEADERS | END_STREAM
+        push_frame(&mut out, 0x1, 0x5, stream_id, &block);
+    } else {
+        push_frame(&mut out, 0x1, 0x4, stream_id, &block);
+        for chunk in response.body.chunks(DATA_CHUNK) {
+            push_frame(&mut out, 0x0, 0, stream_id, chunk);
+        }
+        push_frame(&mut out, 0x0, 0x1, stream_id, &[]);
     }
-    push_frame(&mut out, 0x0, 0x1, stream_id, &[]);
     let mut goaway = [0; 8];
     goaway[..4].copy_from_slice(&stream_id.to_be_bytes());
     push_frame(&mut out, 0x7, 0, 0, &goaway);

@@ -107,6 +107,27 @@ fn get_with_status(
 }
 
 #[test]
+fn head_gets_the_headers_and_no_content_over_http1() {
+    let (_runtime, addr, roots) = start();
+    let mut config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    let name = ServerName::try_from("localhost").expect("valid name");
+    let conn = ClientConnection::new(Arc::new(config), name).expect("client connection");
+    let mut tls = StreamOwned::new(conn, TcpStream::connect(addr).expect("connect"));
+    tls.write_all(b"HEAD /api/all HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .expect("send request");
+    let mut response = Vec::new();
+    let _ = tls.read_to_end(&mut response);
+    let response = String::from_utf8(response).expect("UTF-8 response");
+    let (head, content) = response.split_once("\r\n\r\n").expect("header block");
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    assert!(head.contains("\r\nContent-Length: "), "{head}");
+    assert_eq!(content, "", "RFC 9110 section 9.3.2: no content for HEAD");
+}
+
+#[test]
 fn unknown_paths_get_the_built_in_404_page() {
     for path in ["/nope", "/explore", "/api/nope?x=<b>"] {
         let (_runtime, addr, roots) = start();

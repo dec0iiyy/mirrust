@@ -66,9 +66,13 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     head.push_str("Server: mirrust\r\n\r\n");
 
     let mut response = head.into_bytes();
-    response.extend_from_slice(&body);
-    // tls.peet.ws writes two CRLFs past Content-Length; so do we, for comparability.
-    response.extend_from_slice(b"\r\n\r\n");
+    // A response to HEAD has the headers of the GET response, `Content-Length` included, and
+    // no content (RFC 9110 section 9.3.2).
+    if report.method != "HEAD" {
+        response.extend_from_slice(&body);
+        // tls.peet.ws writes two CRLFs past Content-Length; so do we, for comparability.
+        response.extend_from_slice(b"\r\n\r\n");
+    }
     stream.write_all(&response).await?;
     stream.shutdown().await
 }

@@ -184,6 +184,34 @@ async fn options_gets_cors_and_extra_headers_and_an_empty_body() {
 }
 
 #[tokio::test]
+async fn head_gets_the_headers_of_the_body_and_no_data_frames() {
+    let (client_io, mut server_io) = tokio::io::duplex(1 << 16);
+    let server = tokio::spawn(async move {
+        serve(&mut server_io, &[], Response::default(), |_| Response {
+            body: b"twelve bytes".to_vec(),
+            ..Response::default()
+        })
+        .await
+    });
+    let (mut sender, connection) = h2::client::handshake(client_io).await.expect("handshake");
+    tokio::spawn(connection);
+    let request = http::Request::builder()
+        .method("HEAD")
+        .uri("https://example.test/")
+        .body(())
+        .expect("request");
+    let (response, _) = sender.send_request(request, true).expect("send");
+    let response = response.await.expect("response");
+    assert_eq!(response.headers()["content-length"], "12");
+    let mut body = response.into_body();
+    assert!(
+        body.data().await.is_none(),
+        "RFC 9110 section 9.3.2: no content in the response to HEAD"
+    );
+    server.await.expect("join").expect("serve");
+}
+
+#[tokio::test]
 async fn garbage_is_an_error_not_a_panic() {
     use tokio::io::AsyncWriteExt as _;
     let (mut client_io, mut server_io) = tokio::io::duplex(1 << 16);

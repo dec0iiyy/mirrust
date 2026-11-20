@@ -286,7 +286,8 @@ status and for `OPTIONS` answers:
 
 HTTP/1.1 and HTTP/2 responses also carry a `Date` header (RFC 9110 section 6.6.1), taken when
 the answer is built; HTTP/3 responses do not have one yet. HTTP/1.1 connections are closed after one response
-and say so with `Connection: close`; HTTP/2 connections are too. An HTTP/3 connection answers up
+and say so with `Connection: close`; HTTP/2 connections are too. A `HEAD` request on HTTP/1.1 and
+HTTP/2 gets the headers of the answer, `Content-Length` included, and no body. An HTTP/3 connection answers up
 to 100 requests, one after another; then the server sends GOAWAY.
 
 ### `/api/all`
