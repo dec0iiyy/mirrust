@@ -3,11 +3,14 @@
 //!
 //! Each connection is handled in three steps: the ClientHello is read off the socket and
 //! fingerprinted, the buffered bytes are replayed into rustls for the handshake, and the
-//! negotiated ALPN protocol picks the HTTP handler.
+//! negotiated ALPN protocol picks the HTTP handler. With [`acme`] on, a connection whose
+//! ClientHello offers ALPN `acme-tls/1` is a certificate validation by the CA and is answered
+//! apart from all of that.
 //!
 //! HTTP/3 ([`serve_h3`]) runs on UDP: the ClientHello is read from the client's QUIC Initial
 //! packets before quinn sees them, then quinn and `h3` serve the requests.
 
+pub mod acme;
 mod capture;
 mod client_match;
 mod error_chain;
@@ -35,6 +38,7 @@ use std::time::Duration;
 use fingerprint::Transport;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::server::ResolvesServerCert;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
 use tokio_rustls::TlsAcceptor;
@@ -44,6 +48,7 @@ pub use crate::h3_handler::serve_h3;
 pub use crate::limit::ConnectionLimit;
 pub use crate::request_log::{LogWriter, RequestLog};
 
+use crate::acme::AcmeChallenges;
 use crate::capture::{Rewind, read_client_hello};
 use crate::report::TlsDetails;
 
@@ -69,6 +74,11 @@ pub struct Config {
     /// Counts failed connections, TCP and QUIC together, and prints a summary on stderr.
     /// Give [`serve`] and [`serve_h3`] the same `Config` (or clones of it) to get one summary.
     pub failures: FailureLog,
+    /// Certificates for the CA's validation connections (ALPN `acme-tls/1`) on TCP; `None`
+    /// treats such a connection like any other. A validation connection is answered with
+    /// these, takes a connection slot like any other, and is neither logged nor counted as a
+    /// failure.
+    pub challenges: Option<AcmeChallenges>,
 }
 
 impl Config {
@@ -86,6 +96,7 @@ impl Default for Config {
             h3_port: None,
             connections: ConnectionLimit::default(),
             failures: FailureLog::default(),
+            challenges: None,
         }
     }
 }
@@ -99,11 +110,26 @@ pub fn tls_config(
     certs: Vec<CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
 ) -> Result<ServerConfig, rustls::Error> {
-    let mut config = ServerConfig::builder()
+    let config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
+    Ok(with_http_alpn(config))
+}
+
+/// Like [`tls_config`], but the certificate comes from `resolver` for every handshake, so a
+/// certificate that changes while the server runs (see [`acme::CurrentCert`]) is picked up
+/// without a restart. [`serve_h3`] takes this configuration too and uses the same resolver.
+#[must_use]
+pub fn tls_config_with_resolver(resolver: Arc<dyn ResolvesServerCert>) -> ServerConfig {
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_cert_resolver(resolver);
+    with_http_alpn(config)
+}
+
+fn with_http_alpn(mut config: ServerConfig) -> ServerConfig {
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    Ok(config)
+    config
 }
 
 /// A fresh self-signed certificate for `localhost` and `127.0.0.1`.
@@ -168,6 +194,14 @@ async fn handle(
     deadline: Instant,
 ) -> io::Result<()> {
     let (buffered, hello) = by(deadline, read_client_hello(&mut stream)).await?;
+    if let Some(challenges) = &config.challenges
+        && AcmeChallenges::is_challenge(&hello)
+    {
+        // The CA validating a name. Whatever happens, this is not a visit: nothing is logged
+        // and no failure is counted, so a scanner sending acme-tls/1 shows up nowhere.
+        let _ = by(deadline, challenges.respond(Rewind::new(buffered, stream))).await;
+        return Ok(());
+    }
     let accepted = by(deadline, acceptor.accept(Rewind::new(buffered, stream))).await;
     let tls = match accepted {
         Ok(tls) => tls,

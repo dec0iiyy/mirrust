@@ -32,7 +32,11 @@ dropped, which closes it, and the refusal is counted. The permit moves into the 
 task and is released when the task ends.
 
 ```
-accept ──► read ClientHello records ──► fingerprint ──► rustls handshake (replayed bytes)
+accept ──► read ClientHello records ──► ALPN acme-tls/1? ──yes──► challenge certificate, close
+                    (--domain only)               │
+                                                  no
+                                                  ▼
+                              fingerprint ──► rustls handshake (replayed bytes)
                                                               │
                                               ALPN h2 ────────┼──── otherwise
                                                 ▼                       ▼
@@ -46,6 +50,16 @@ accept ──► read ClientHello records ──► fingerprint ──► rustls
    the server reads TLS records off the socket itself until one whole handshake message is
    assembled (it may span several records). The first record must be a handshake record and the
    first message a ClientHello; the message is capped at 64 KiB. Every byte read is kept.
+   **The challenge branch.** With `--domain`, `Config::challenges` is set, and `handle` looks at
+   the ALPN list of the captured ClientHello (`AcmeChallenges::is_challenge`, which uses the
+   `fingerprint` parser). If it offers `acme-tls/1`, the connection is the CA validating a name
+   (TLS-ALPN-01, RFC 8737): the captured bytes go into `Rewind` as usual, but the stream is given
+   to a second `TlsAcceptor` whose certificate resolver holds the challenge certificates of the
+   order in progress, keyed by name, and whose only ALPN protocol is `acme-tls/1`. The
+   handshake is run and the connection closed. `handle` then returns `Ok` whatever happened:
+   nothing is logged, no failure is counted, no report is built. The connection holds its
+   connection slot and the 15-second deadline like any other. Without `--domain`, or when ALPN
+   does not offer `acme-tls/1`, the next step is unchanged.
 2. **Replay into rustls.** The kept bytes are put back in front of the socket (`Rewind`) and the
    stream is handed to `tokio_rustls::TlsAcceptor`, which performs a normal handshake. The server
    offers ALPN `h2` then `http/1.1` and accepts TLS 1.2 and 1.3. If the handshake fails or runs
@@ -187,6 +201,19 @@ directly.
 
 ## Design decisions
 
+- **Certificates come from a resolver, not a fixed pair.** With `--domain` the TLS
+  configuration for TCP, and the one `serve_h3` turns into a QUIC configuration, use
+  `acme::CurrentCert`, a `ResolvesServerCert` that returns the latest certificate (a
+  `RwLock<Option<Arc<CertifiedKey>>>`), or fails the handshake while it is empty. The ACME task
+  (`acme::start`) swaps a new certificate in after each order, so a renewal needs no restart
+  and TCP and QUIC always agree.
+- **`instant-acme`, not `rustls-acme`.** `rustls-acme` 0.15.4 brings its own async stack
+  (`async-io`, `async-web-client`, `blocking`), `chrono`, `x509-parser` and a second `rcgen`
+  (0.13), and its acceptor wants to read the ClientHello itself, which this server already
+  does before rustls. `instant-acme` 0.8.5 (Apache-2.0) adds `hyper` and `hyper-rustls` on the
+  rustls, aws-lc-rs and `rcgen` the workspace already has, and leaves the connection handling
+  alone. The TLS-ALPN-01 certificate is built with `rcgen`
+  (`CustomExtension::new_acme_identifier` with the SHA-256 of the key authorization, critical).
 - **Capture before the TLS library.** Reading the ClientHello from the socket and replaying it
   keeps the exact bytes the client sent, independent of what rustls parses or exposes, and the
   same code works for any rustls version.

@@ -1,29 +1,37 @@
 # Deploying mirrust
 
 This page sets up mirrust on a Debian or Ubuntu server (x86_64, systemd) as a sandboxed
-service on TCP and UDP port 443, with a certificate from Let's Encrypt. `mirror.example.com`
-stands for your host name throughout.
+service on TCP and UDP port 443, with a certificate from Let's Encrypt that mirrust obtains and
+renews by itself. `mirror.example.com` stands for your host name throughout. To use certbot or
+other certificate files instead, see [Alternative: certificate files](#alternative-certificate-files).
 
 What has been run, on an Ubuntu 24.04 server (x86_64, systemd 255): the release binary built
-by the `Linux build` workflow, under a copy of the unit below that listens on port 8443 with
-a self-signed certificate passed through `LoadCredential=`. `systemd-analyze verify` reported
-nothing for the unit and `systemd-analyze security` rated it 1.6, "OK". The service ran as a
+by the `Linux build` workflow, under a copy of the unit as it was before the built-in ACME
+client existed (the certificate-file variant below), listening on port 8443 with a
+self-signed certificate passed through `LoadCredential=`. `systemd-analyze verify` reported
+nothing for that unit and `systemd-analyze security` rated it 1.6, "OK". The service ran as a
 dynamic user, kept its request log in `/var/log/mirrust/`, answered over HTTP/1.1 and HTTP/2
 (curl) and HTTP/3 (Chrome), handled 300 requests with 20 at a time without an error or a
 restart (peak memory about 3.5 MB), logged failed connections, and stopped cleanly on
 `systemctl stop`.
 
-What has not been run: port 443 (so `CAP_NET_BIND_SERVICE` was not exercised), IPv6, the
-Let's Encrypt and firewall steps, the logrotate rules and the Docker image. Check those
-before you rely on them.
+What has not been run: the built-in ACME client against Let's Encrypt, staging or production
+(see [What the tests cover](#what-the-tests-cover-and-what-they-do-not)), the current
+`mirrust.service` with `StateDirectory=` on a real server, port 443 (so
+`CAP_NET_BIND_SERVICE` was not exercised), IPv6, the firewall steps, the logrotate rules and
+the Docker image. Check those before you rely on them.
 
 You need:
 
-- A server with a public address and a DNS `A` record for the host name that points to it.
+- A server with a public address and a DNS `A` record for the host name that points to it
+  (or `--domain auto`, which needs no record; see step 3).
 - systemd 247 or later: Debian 11, Ubuntu 22.04, or newer. Check with `systemctl --version`.
 - Port 443 free for both TCP and UDP. mirrust terminates TLS itself. Do not put a
   TLS-terminating reverse proxy or CDN in front of it: mirrust would then report the proxy's
-  TLS and HTTP/2 fingerprint, not the client's.
+  TLS and HTTP/2 fingerprint, not the client's. A proxy would also receive the Let's
+  Encrypt validation instead of mirrust.
+- The `ca-certificates` package, which a normal Debian or Ubuntu server has: mirrust checks
+  Let's Encrypt's own certificate against the system's root certificates.
 
 Files used below are in [`deploy/`](../deploy): `mirrust.service`, `mirrust.logrotate`
 and `Dockerfile`.
@@ -70,54 +78,119 @@ The binary needs no other files: the HTML pages are compiled in.
 
 ## 2. Open the firewall
 
-Open TCP 443 (HTTP/1.1 and HTTP/2) and UDP 443 (HTTP/3). If you will obtain the certificate
-with certbot's standalone mode, also open TCP 80. With `ufw`:
+Open TCP 443 (HTTP/1.1, HTTP/2 and the Let's Encrypt validation) and UDP 443 (HTTP/3), and
+nothing else: the validation runs on TCP 443, so port 80 stays closed. With `ufw`:
 
 ```console
 $ sudo ufw allow 443/tcp
 $ sudo ufw allow 443/udp
-$ sudo ufw allow 80/tcp
 $ sudo ufw status
 ```
 
 If `ufw` is not enabled yet, allow SSH (`sudo ufw allow OpenSSH`) before `sudo ufw enable`.
 If the hosting provider has its own firewall or security groups, open the same ports there.
 Forgetting UDP 443 leaves HTTP/1.1 and HTTP/2 working and HTTP/3 silently unreachable.
+Forgetting TCP 443 makes certificate issuance fail.
 
-## 3. Obtain a certificate
+## 3. Point the name at the server and get a certificate
 
-mirrust does not listen on port 80 and does not answer ACME challenges, so the certificate
-comes from a separate client. Two ways with certbot:
-
-**Standalone (HTTP-01).** certbot starts its own temporary server on port 80, which is free
-because mirrust does not use it. Port 80 must be reachable from the internet when the
-certificate is issued and at every renewal.
+Create a DNS `A` record for `mirror.example.com` that points at the server's public address
+and wait until it resolves. Then start mirrust with `--domain`:
 
 ```console
-$ sudo apt install certbot
-$ sudo certbot certonly --standalone -d mirror.example.com
+$ sudo mirrust --domain mirror.example.com
 ```
 
-**DNS challenge (DNS-01).** No inbound port is needed. Use the certbot plugin for your DNS
-provider so that renewal is automatic, for example:
+That is the whole setup: with `--domain` and no `--listen`, mirrust listens on `0.0.0.0:443`
+(TCP, and UDP for HTTP/3), orders a certificate from Let's Encrypt, answers the validation on
+TCP 443, and renews the certificate about 30 days before it expires. The systemd service in
+the next step runs it the same way. The flags involved:
 
-```console
-$ sudo apt install certbot python3-certbot-dns-cloudflare
-$ sudo certbot certonly --dns-cloudflare \
-    --dns-cloudflare-credentials /root/cloudflare.ini -d mirror.example.com
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--domain NAME` | none | The host name to certify. Repeat it for up to 4 names on one certificate. Conflicts with `--cert`/`--key`. |
+| `--acme-dir DIR` | `./mirrust-acme` | Where the account key and the certificate are kept. |
+| `--acme-email ADDR` | none | Contact address for Let's Encrypt. It is used only when the account is created; changing it later does nothing. |
+| `--acme-staging` | off | Use the Let's Encrypt staging CA. |
+
+What happens, in order:
+
+1. mirrust prints the notice that `--domain` means accepting the Let's Encrypt Subscriber
+   Agreement (<https://letsencrypt.org/repository/>), then starts serving at once.
+2. If `--acme-dir` has a valid certificate for exactly these names, it is used and the line
+   says so. Otherwise mirrust prints that it is obtaining one. TLS handshakes fail until the
+   first certificate arrives, HTTP/3 included, which uses the same certificate.
+3. mirrust creates an account (or loads the saved one), orders the certificate, and answers
+   the CA's validation connection on TCP 443. A validation connection is recognised by
+   ALPN `acme-tls/1`; it is answered with a challenge certificate, is not written to the
+   request log and is not counted as a failed connection. It takes a connection slot like any
+   other connection.
+4. The new certificate is used for new connections at once, with no restart.
+
+On stderr, which the journal keeps, each event is one line:
+
+```
+acme: --domain means you accept the Let's Encrypt Subscriber Agreement, https://letsencrypt.org/repository/
+acme: obtaining a certificate for mirror.example.com from Let's Encrypt ...; TLS handshakes fail until it arrives (the name must resolve to this server and TCP 443 must be reachable)
+acme: issued the certificate for mirror.example.com, valid for 89 days, renewal in 59 days
 ```
 
-`certbot certonly --manual --preferred-challenges dns` also works but has to be repeated by hand
-before every expiry.
-
-Either way the files are:
+Later lines say `acme: ordering a certificate for ...` when a renewal starts and
+`acme: renewed the certificate for ...` when it is done. A failed attempt prints one line with
+the CA's error text and the wait before the next attempt, for example:
 
 ```
-/etc/letsencrypt/live/mirror.example.com/fullchain.pem
-/etc/letsencrypt/live/mirror.example.com/privkey.pem
+acme: failed: creating the ACME account: client error (Connect): tcp connect error: ...; next attempt in 5 minutes
 ```
 
-They stay readable by root only. The service does not read them directly; see the next step.
+The waits are 5 minutes, then twice as long after each failure, at most 6 hours, and start
+again after a success. While a renewal fails, the old certificate stays in use. An attempt that
+takes longer than 10 minutes counts as failed.
+
+**Try it first with `--acme-staging`.** The staging CA has far higher rate limits, so a
+mistake in DNS or the firewall costs little; its certificates are not trusted by browsers
+(curl needs `-k`). Staging and production keep separate accounts and certificates in
+`--acme-dir`, in the subdirectories `letsencrypt-staging` and `letsencrypt`, so removing
+`--acme-staging` afterwards orders a real certificate. Let's Encrypt limits the certificates
+and the failed validations per name; see <https://letsencrypt.org/docs/rate-limits/>.
+
+**`--domain auto`.** `--domain auto` uses the name `A-B-C-D.sslip.io` for the machine's public
+IPv4 address `A.B.C.D`, so no DNS record of your own is needed. sslip.io is a free third-party
+DNS service that answers `A-B-C-D.sslip.io` with `A.B.C.D`; whoever runs it controls what that
+name resolves to. mirrust learns its address without asking any service: it opens a UDP
+socket towards a documentation address (192.0.2.1) and reads which local address the operating
+system chose for it, which sends no packet. If that address is loopback, private (RFC 1918),
+link-local, in the carrier-grade NAT range 100.64.0.0/10 or otherwise not routable, mirrust
+refuses to start and asks for an explicit `--domain`. That is also what happens on a cloud
+server whose public address is a NAT mapping of a private one, so give such a server its name.
+`auto` stands for the whole certificate and cannot be combined with other names.
+
+**The cache.** `--acme-dir` is created with mode 0700 if it does not exist, and holds, in a
+subdirectory per CA, `account.json` (the ACME account key), `private-key.pem`,
+`certificate.pem` and `names.txt`, all with mode 0600. Keep it private, and keep it across
+restarts: a restart that finds a valid certificate for the same names does not ask Let's
+Encrypt again. A cached certificate for other names, or one that has expired, is ignored. A
+directory that already exists is used as it is, so check its mode.
+
+**Port.** Let's Encrypt validates on TCP port 443 only. If you give `--listen` another port,
+mirrust still starts but prints a warning, and issuance fails unless something forwards TCP 443
+to that port.
+
+### What the tests cover, and what they do not
+
+Tested without any certificate authority: the flags and their conflicts, the `auto` name and
+each refused address class, the ALPN decision between a validation and a normal connection, a
+validation connection being answered with the challenge certificate (checked for the critical
+`id-pe-acmeIdentifier` extension and its digest) while leaving no log line and no failure
+count, the certificate resolver returning a certificate and switching to a new one, the
+renewal time, the cache and its permissions, and the backoff.
+
+Not exercised: the exchange with a real CA, that is, the account, order, validation and
+finalisation calls that the `instant-acme` library makes. Nothing here proves that Let's
+Encrypt, staging or production, accepts the challenge certificate or that the issued
+certificate installs. mirrust has only been started against a CA it could not reach, where it
+printed one failure line with a 5-minute wait. Run it once with `--acme-staging` on the real
+server before relying on it.
 
 ## 4. Install the service
 
@@ -130,24 +203,30 @@ $ sudo systemctl enable --now mirrust.service
 $ systemctl status mirrust.service
 ```
 
-The journal should show the line the binary prints once it is listening:
+The journal should show the `acme:` lines described above and the line the binary prints once
+it is listening, and once the CA has validated the name the line that says the certificate was issued:
 
 ```console
 $ journalctl -u mirrust.service -n 20
+... acme: obtaining a certificate for YOUR.HOST.NAME from Let's Encrypt ...
 ... listening on https://0.0.0.0:443 (TCP and HTTP/3 over UDP)
+... acme: issued the certificate for YOUR.HOST.NAME, valid for 89 days, renewal in 59 days
 ```
 
 What the unit does, in short (every line is commented in the file):
 
-- Runs `/usr/local/bin/mirrust --listen 0.0.0.0:443 --cert ... --key ... --log
-  /var/log/mirrust/requests.jsonl`.
+- Runs `/usr/local/bin/mirrust --listen 0.0.0.0:443 --domain YOUR.HOST.NAME --acme-dir
+  ${STATE_DIRECTORY} --log /var/log/mirrust/requests.jsonl`. Add `--acme-email` and, for a first
+  try, `--acme-staging` to the `ExecStart=` line.
 - Runs as a dynamic user that exists only while the service runs, with
   `CAP_NET_BIND_SERVICE` as its only capability, so it can bind TCP 443 and UDP 443 and nothing
   else that needs privileges.
-- Passes the certificate and key with `LoadCredential=`: systemd reads both files as root at
-  start and gives the service private read-only copies. The service user never needs access
-  to `/etc/letsencrypt`.
-- Mounts the file system read-only for the service, except `/var/log/mirrust`.
+- Keeps the ACME account key and the certificate in `/var/lib/mirrust` (`StateDirectory=` with
+  mode 0700). With `DynamicUser=` the real directory is `/var/lib/private/mirrust`, and
+  `/var/lib/mirrust` is a link to it. The directory stays when the service stops, so a restart
+  does not order a certificate again.
+- Mounts the file system read-only for the service, except `/var/log/mirrust` and
+  `/var/lib/mirrust`.
 - Limits memory to 256 MiB and open files to 65536, and restarts the service on failure.
 - Stops the service with SIGINT. mirrust flushes the request log and exits with status 0 on
   SIGINT and on SIGTERM alike; the unit names SIGINT so that systemd counts the exit as clean.
@@ -251,13 +330,97 @@ stops logging for good while it keeps serving. Restart the service once the caus
 The log contains client addresses and `User-Agent` strings. Choose `rotate` and the schedule to
 match how long you are allowed and willing to keep them.
 
-## 7. Renew the certificate
+## 7. Check the certificate and its renewal
 
-mirrust reads the certificate and key once, at start, and systemd copies them for the service
-at start as well. A renewed certificate is used only after a restart.
+mirrust renews the certificate by itself, about 30 days before it expires, and starts using the
+new one for new connections without a restart; the journal gets an `acme: renewed ...` line.
+To see which certificate is being served:
 
-The certbot package installs a timer that renews certificates automatically. Add a deploy hook,
-which certbot runs after each successful renewal:
+```console
+$ echo | openssl s_client -connect mirror.example.com:443 -servername mirror.example.com 2>/dev/null \
+    | openssl x509 -noout -issuer -dates
+```
+
+The renewal needs TCP 443 to be reachable from the internet and the name to still point at
+the server, as the first issuance did. If renewals fail, the `acme: failed:` lines in the
+journal say why; the certificate in use stays until it expires.
+
+## 8. Update
+
+Replace the binary and restart:
+
+```console
+$ sudo install -m 0755 mirrust /usr/local/bin/mirrust
+$ sudo systemctl restart mirrust.service
+```
+
+## Alternative: certificate files
+
+Use this to keep certbot, a certificate from another CA, or a certificate you manage yourself.
+mirrust then does no ACME: give it `--cert` and `--key`, as before (these conflict with
+`--domain`).
+
+**Firewall.** TCP 443 and UDP 443 as in step 2. With certbot's standalone mode also open TCP 80:
+`sudo ufw allow 80/tcp`.
+
+**Obtain a certificate.** mirrust does not listen on port 80 and does not answer HTTP-01
+challenges, so with certbot two ways work:
+
+**Standalone (HTTP-01).** certbot starts its own temporary server on port 80, which is free
+because mirrust does not use it. Port 80 must be reachable from the internet when the
+certificate is issued and at every renewal.
+
+```console
+$ sudo apt install certbot
+$ sudo certbot certonly --standalone -d mirror.example.com
+```
+
+**DNS challenge (DNS-01).** No inbound port is needed. Use the certbot plugin for your DNS
+provider so that renewal is automatic, for example:
+
+```console
+$ sudo apt install certbot python3-certbot-dns-cloudflare
+$ sudo certbot certonly --dns-cloudflare \
+    --dns-cloudflare-credentials /root/cloudflare.ini -d mirror.example.com
+```
+
+`certbot certonly --manual --preferred-challenges dns` also works but has to be repeated by hand
+before every expiry.
+
+Either way the files are:
+
+```
+/etc/letsencrypt/live/mirror.example.com/fullchain.pem
+/etc/letsencrypt/live/mirror.example.com/privkey.pem
+```
+
+They stay readable by root only. The service does not read them directly; see the next part.
+
+**The unit.** In `/etc/systemd/system/mirrust.service`, replace the `--domain` and `--acme-dir`
+arguments of `ExecStart=` with the two certificate arguments, and add the two `LoadCredential=`
+lines. `StateDirectory=` is not needed any more and can stay or go:
+
+```ini
+ExecStart=/usr/local/bin/mirrust \
+    --listen 0.0.0.0:443 \
+    --cert ${CREDENTIALS_DIRECTORY}/cert.pem \
+    --key ${CREDENTIALS_DIRECTORY}/key.pem \
+    --log /var/log/mirrust/requests.jsonl
+
+LoadCredential=cert.pem:/etc/letsencrypt/live/mirror.example.com/fullchain.pem
+LoadCredential=key.pem:/etc/letsencrypt/live/mirror.example.com/privkey.pem
+```
+
+`${CREDENTIALS_DIRECTORY}` is set by systemd because of `LoadCredential=`: systemd reads both
+files as root at start and gives the service private read-only copies, so the service user
+never needs access to `/etc/letsencrypt`. This is the variant that ran on the Ubuntu server
+described at the top of this page, with a self-signed certificate instead of the certbot
+files.
+
+**Renew the certificate.** mirrust reads the certificate and key once, at start, and systemd
+copies them for the service at start as well. A renewed certificate is used only after a
+restart. The certbot package installs a timer that renews certificates automatically. Add a
+deploy hook, which certbot runs after each successful renewal:
 
 ```console
 $ sudo tee /etc/letsencrypt/renewal-hooks/deploy/mirrust.sh >/dev/null <<'EOF'
@@ -268,24 +431,8 @@ $ sudo chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/mirrust.sh
 ```
 
 Check that renewal itself works with `sudo certbot renew --dry-run` (a dry run does not run
-deploy hooks). With the standalone method, TCP 80 must be open for it.
-
-The restart drops the connections open at that moment and the service is listening again right
-after. To see which certificate is being served:
-
-```console
-$ echo | openssl s_client -connect mirror.example.com:443 -servername mirror.example.com 2>/dev/null \
-    | openssl x509 -noout -dates
-```
-
-## 8. Update
-
-Replace the binary and restart:
-
-```console
-$ sudo install -m 0755 mirrust /usr/local/bin/mirrust
-$ sudo systemctl restart mirrust.service
-```
+deploy hooks). With the standalone method, TCP 80 must be open for it. The restart drops the
+connections open at that moment and the service is listening again right after.
 
 ## Docker
 
@@ -309,6 +456,10 @@ $ docker run -d --name mirrust --restart unless-stopped \
 Notes:
 
 - Without `--cert` and `--key` the container serves a self-signed certificate for `localhost`.
+- `--domain` is not set up in this image: the Debian slim image does not normally include
+  `ca-certificates`, so mirrust may be unable to check Let's Encrypt's certificate. Use
+  certificate files as above, or add `ca-certificates` to the image and mount a directory
+  that UID 10001 can write for `--acme-dir`. Neither has been run.
 - Publish the container's port 443 as the host's port 443. The `Alt-Svc` header names the port
   mirrust listens on inside the container, so a mapping such as `-p 443:8443` would point
   HTTP/3 clients at the wrong port.
@@ -327,8 +478,13 @@ Notes:
   works as planned, it needs no extra privileges and the unit would not have to change. The
   fallback described there, a packet socket, would need `CAP_NET_RAW` and `AF_PACKET` added to
   the unit.
-- **Nothing on port 80.** There is no HTTP listener and no redirect to HTTPS.
-- **No reload.** A new certificate, and a log file rotated by renaming, both need a restart.
+- **Nothing on port 80.** There is no HTTP listener and no redirect to HTTPS. The ACME
+  validation does not need one.
+- **No reload.** With certificate files, a new certificate needs a restart; so does a log file
+  rotated by renaming. A certificate from `--domain` is replaced while the server runs.
+- **ACME is Let's Encrypt only, one challenge type.** There is no flag for another CA, no
+  wildcard names (they need DNS validation) and no HTTP-01 or DNS-01. A name that cannot reach
+  mirrust on TCP 443 cannot get a certificate.
 - **No IP block list.** Filter in the firewall if you need to.
 
 The full list of known gaps is in [architecture.md](architecture.md#known-gaps).

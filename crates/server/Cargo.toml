@@ -21,6 +21,7 @@ h3-quinn.workspace = true
 http.workspace = true
 http2 = { path = "../http2" }
 http3 = { path = "../http3" }
+instant-acme.workspace = true
 quic = { path = "../quic" }
 quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen.workspace = true

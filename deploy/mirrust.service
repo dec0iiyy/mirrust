@@ -1,9 +1,12 @@
-# mirrust.service: mirrust on TCP and UDP port 443 as an unprivileged, sandboxed service.
+# mirrust.service: mirrust on TCP and UDP port 443 as an unprivileged, sandboxed service, with
+# a Let's Encrypt certificate that mirrust obtains and renews itself.
 #
-# Install as /etc/systemd/system/mirrust.service and replace mirror.example.com in the two
-# LoadCredential= lines with the host name of your certificate. Steps: docs/deploy.md.
+# Install as /etc/systemd/system/mirrust.service and replace mirror.example.com in the
+# --domain argument with your host name, which must have a DNS A record pointing at this
+# server. Steps: docs/deploy.md. To use certificate files from certbot instead, see
+# "Alternative: certificate files" there.
 #
-# Needs systemd 247 or later (LoadCredential=, ProtectProc=): Debian 11, Ubuntu 22.04 or newer.
+# Needs systemd 247 or later (ProtectProc=): Debian 11, Ubuntu 22.04 or newer.
 # Every directive below is documented in systemd.exec(5), systemd.service(5),
 # systemd.resource-control(5) or systemd.kill(5).
 
@@ -21,19 +24,19 @@ StartLimitIntervalSec=0
 Type=exec
 # --listen takes one address. 0.0.0.0 is IPv4 only; see docs/deploy.md for IPv6.
 # TCP on it serves HTTP/1.1 and HTTP/2, UDP on the same port serves HTTP/3.
-# ${CREDENTIALS_DIRECTORY} is set by systemd because of LoadCredential= below.
+# --domain makes mirrust obtain a Let's Encrypt certificate for that name and renew it before
+# it expires, answering the validation on TCP port 443 (TLS-ALPN-01), so no other port needs
+# to be open. It means accepting the Let's Encrypt Subscriber Agreement,
+# https://letsencrypt.org/repository/ . Add --acme-email you@example.com for expiry notices,
+# and --acme-staging to try it first against the staging CA, whose certificates browsers
+# do not trust.
+# --acme-dir is where the account key and the certificate are kept, so that a restart does
+# not order again. ${STATE_DIRECTORY} is set by systemd because of StateDirectory= below.
 ExecStart=/usr/local/bin/mirrust \
     --listen 0.0.0.0:443 \
-    --cert ${CREDENTIALS_DIRECTORY}/cert.pem \
-    --key ${CREDENTIALS_DIRECTORY}/key.pem \
+    --domain mirror.example.com \
+    --acme-dir ${STATE_DIRECTORY} \
     --log /var/log/mirrust/requests.jsonl
-
-# The certificate and key. systemd reads the two files as root when the service starts and
-# gives the service read-only copies that only its own user can open, so that user needs no
-# access to /etc/letsencrypt. The copies are made at start only: restart the service after
-# the certificate is renewed.
-LoadCredential=cert.pem:/etc/letsencrypt/live/mirror.example.com/fullchain.pem
-LoadCredential=key.pem:/etc/letsencrypt/live/mirror.example.com/privkey.pem
 
 # Stop with SIGINT instead of the default SIGTERM: mirrust handles SIGINT (Ctrl-C) by
 # writing out the request log before it exits. systemd counts an exit on SIGINT as clean.
@@ -42,7 +45,7 @@ KillSignal=SIGINT
 TimeoutStopSec=20s
 
 # Restart after a crash, a non-zero exit or an out-of-memory kill; not after "systemctl stop".
-# A start that fails at once, for example because a certificate file is missing, is retried
+# A start that fails at once, for example because --domain is not a valid name, is retried
 # too; "systemctl status mirrust" and the journal show the reason.
 Restart=on-failure
 RestartSec=5s
@@ -77,6 +80,13 @@ PrivateDevices=yes
 # /var/log/mirrust is a symbolic link to it; /var/log/private is closed to other users.
 LogsDirectory=mirrust
 LogsDirectoryMode=0750
+# Creates /var/lib/mirrust, owned by the service user and writable by it, for the ACME account
+# key and the certificate, and gives it to mirrust as $STATE_DIRECTORY. Only that user can
+# open it. With DynamicUser= the directory is really /var/lib/private/mirrust, and
+# /var/lib/mirrust is a symbolic link to it; /var/lib/private is closed to other users. The
+# directory is kept when the service stops.
+StateDirectory=mirrust
+StateDirectoryMode=0700
 # New files, the request log included, are not readable by other users.
 UMask=0027
 

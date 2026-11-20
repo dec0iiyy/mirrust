@@ -103,7 +103,7 @@ Not measured yet:
 - **The HTTP/3 request's pseudo-header order**, so the HTTP/3 fingerprint covers SETTINGS and
   stream types only. It is not in `/api/clean` or in the request log.
 
-Tested: `cargo test --workspace` (218 tests), clippy, `cargo fmt --all --check` and the build
+Tested: `cargo test --workspace` (247 tests), clippy, `cargo fmt --all --check` and the build
 with Rust 1.88 in CI on Ubuntu and macOS, and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
 
@@ -113,8 +113,12 @@ port 8443 and a self-signed certificate. It answered over HTTP/1.1, HTTP/2 (curl
 (Chrome), served 300 requests at 20 in parallel without an error, peaked at about 3.5 MB of
 memory, and stopped cleanly. See [deploy.md](deploy.md) for the details.
 
-Not run yet: port 443, IPv6, the Let's Encrypt and firewall steps, the logrotate rules and the
-Docker image in `deploy/`. Treat those instructions as written but unverified.
+Not run yet: port 443, IPv6, the firewall steps, the logrotate rules and the Docker image in
+`deploy/`. Also not run: the built-in ACME client (`--domain`) against Let's Encrypt, staging
+or production. Its flags, the validation connection, the certificate resolver, the cache and
+the retry timing are tested; the exchange with the CA, which the `instant-acme` library
+performs, is not, and nor is the current `deploy/mirrust.service` with `StateDirectory=` on a
+server. Treat those instructions as written but unverified.
 
 The dataset behind the `client` field has 31 entries, so a real client often gets `ciphers`
 or `none`; see [docs/fingerprints.md](fingerprints.md#12-known-clients-client).
@@ -122,21 +126,56 @@ or `none`; see [docs/fingerprints.md](fingerprints.md#12-known-clients-client).
 ## Command line
 
 ```
-mirrust [--listen ADDR] [--cert PEM --key PEM] [--cors-key KEY] [--log PATH]
-           [--max-connections N]
+mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
+        [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
+        [--cors-key KEY] [--log PATH] [--max-connections N]
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--listen ADDR` | `127.0.0.1:8443` | Socket address to bind. TCP serves HTTP/1.1 and HTTP/2; UDP on the same address serves HTTP/3. |
-| `--cert PEM` | none | PEM certificate chain. Must be given together with `--key`. |
-| `--key PEM` | none | PEM private key. Without `--cert`/`--key`, a self-signed certificate for `localhost` and `127.0.0.1` is generated. |
+| `--listen ADDR` | `127.0.0.1:8443`; `0.0.0.0:443` with `--domain` | Socket address to bind. TCP serves HTTP/1.1 and HTTP/2; UDP on the same address serves HTTP/3. |
+| `--cert PEM` | none | PEM certificate chain. Must be given together with `--key`. Conflicts with `--domain`. |
+| `--key PEM` | none | PEM private key. Without `--cert`/`--key` and without `--domain`, a self-signed certificate for `localhost` and `127.0.0.1` is generated. |
+| `--domain NAME` | none | Get a Let's Encrypt certificate for this host name and renew it ([ACME](#built-in-acme)). Repeat for up to 4 names on one certificate. `auto` means `A-B-C-D.sslip.io` for the machine's public IPv4 address `A.B.C.D`. Conflicts with `--cert`/`--key`. Accepts the Let's Encrypt Subscriber Agreement. |
+| `--acme-dir DIR` | `./mirrust-acme` | Where the ACME account key and the issued certificate are kept, so a restart does not order again. Needs `--domain`. |
+| `--acme-email ADDR` | none | Contact address given to Let's Encrypt when the account is created. Needs `--domain`. |
+| `--acme-staging` | off | Use the Let's Encrypt staging CA, whose certificates browsers do not trust. Takes no value. Needs `--domain`. |
 | `--cors-key KEY` | `X-CORS` | A request with a header line that starts with this text gets CORS headers. An empty value turns this off. |
 | `--log PATH` | no log | Append one JSON line per request, and per TLS handshake that fails after the ClientHello, to this file. See [Request log](#request-log). |
 | `--max-connections N` | `1024` | Connections that may be open at the same time, TCP and QUIC counted together; at least 1. See [Connection limit and shutdown](#connection-limit-and-shutdown). |
 | `-h`, `--help` | | Print usage and exit. |
 
-Each flag takes its value as the next argument (`--listen 0.0.0.0:443`, not `--listen=...`).
+Each flag but `--acme-staging` takes its value as the next argument (`--listen 0.0.0.0:443`,
+not `--listen=...`).
+
+### Built-in ACME
+
+`--domain` makes mirrust obtain and renew its own certificate from Let's Encrypt with the
+TLS-ALPN-01 challenge (RFC 8737) on the TCP listener, so only port 443 is needed. TCP port 443
+is where Let's Encrypt validates: with `--listen` on another port mirrust starts but prints a
+warning.
+
+- The server starts serving at once. Until the first certificate exists a TLS handshake fails
+  (TCP and QUIC); the certificate is then replaced while the server runs, at the start of each
+  handshake, so a renewal needs no restart.
+- It prints the notice about the Subscriber Agreement once, and then one `acme:` line on
+  stderr per event: obtaining or using the cached certificate, ordering, issued or renewed with
+  the days of validity left, and failed with the CA's error text and the wait before the next
+  attempt. After a failure it waits 5 minutes, then twice as long each time up to 6 hours. A
+  certificate is renewed 30 days before it ends, or a third of its lifetime before it ends if
+  that is shorter.
+- A connection whose ClientHello offers ALPN `acme-tls/1` is the CA validating a name. It gets
+  the challenge certificate, takes a connection slot like any connection, and is not written to
+  the request log and not counted in the failure summary.
+- `--acme-dir` and every directory it creates have mode 0700 on Unix, and the files in it
+  (`account.json`, `private-key.pem`, `certificate.pem`, `names.txt`, in a subdirectory
+  `letsencrypt` or `letsencrypt-staging`) mode 0600. Key material is never printed.
+- `--domain auto` finds the local address of the default route without sending a packet, and
+  refuses to start if it is loopback, private (RFC 1918), link-local, in `100.64.0.0/10` or
+  otherwise not routable. sslip.io is a free third-party DNS service.
+
+See [deploy.md](deploy.md#3-point-the-name-at-the-server-and-get-a-certificate) for the setup
+and for what is tested and what is not.
 
 The `--cors-key` prefix is compared with the start of each header line (`Name: value`) without
 regard to ASCII case, so the default `X-CORS` matches `x-cors-…` headers on HTTP/2 and HTTP/3 as
@@ -511,7 +550,7 @@ the server. Tests check that it parses, that its JA4s are unique and are the has
 Other tests cover the JA4 worked example from the FoxIO specification, the RFC 9001 Appendix A
 QUIC Initial, a recorded Chrome QUIC Initial split over two datagrams, and the server end to end
 over HTTP/1.1, HTTP/2 and HTTP/3 with an in-process client, including the connection limit,
-the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 218 tests.
+the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 247 tests.
 
 ## Compatibility with tls.peet.ws
 
