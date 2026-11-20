@@ -123,7 +123,17 @@ pick_downloader() {
 # fetch URL FILE
 fetch() {
     if [ "$downloader" = curl ]; then
-        curl --fail --silent --show-error --location --retry 2 --output "$2" "$1"
+        # Redirects are followed to https only (curl would follow one to plain http), and an
+        # https URL is fetched over TLS 1.2 or newer, as rustup-init does. The URL is http
+        # only for the tests' local server. A connection that stalls is given up after 30 s
+        # without data below 1 kB/s; there is no limit on the total time, for slow links.
+        case "$1" in
+            https://*) proto='--proto =https --tlsv1.2' ;;
+            *) proto= ;;
+        esac
+        # shellcheck disable=SC2086 # $proto is a list of options on purpose
+        curl --fail --silent --show-error --location --retry 2 $proto --proto-redir =https \
+            --connect-timeout 30 --speed-limit 1000 --speed-time 30 --output "$2" "$1"
     else
         wget --quiet --output-document="$2" "$1"
     fi

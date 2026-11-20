@@ -26,9 +26,13 @@ esac
 
 work=$(mktemp -d)
 server_pid=
+redirect_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then
         kill "$server_pid" 2>/dev/null
+    fi
+    if [ -n "$redirect_pid" ]; then
+        kill "$redirect_pid" 2>/dev/null
     fi
     rm -rf "$work"
 }
@@ -254,6 +258,51 @@ check "a missing release file: temporary files deleted" no_temp_left
 run_install UNAME_M=aarch64 MIRRUST_BASE_URL="$base/release" -- --prefix "$work/bin7"
 check "a SHA256SUMS entry that does not match the file: refused" sh -c \
     "[ $status -ne 0 ] && grep -q 'CHECKSUM MISMATCH' '$work/out' && [ ! -e '$work/bin7' ]"
+
+# A server that answers every request with a redirect to the same file on the release server
+# over plain http: curl follows that by default, install.sh must not (redirects go to https
+# only).
+cat >"$work/redirect.py" <<'EOF'
+import http.server
+import sys
+
+port, target = int(sys.argv[1]), sys.argv[2]
+
+
+class Redirect(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(302)
+        self.send_header("Location", target + self.path.rsplit("/", 1)[1])
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+http.server.HTTPServer(("127.0.0.1", port), Redirect).serve_forever()
+EOF
+redirect_port=$(python3 -I -c 'import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()')
+python3 -I "$work/redirect.py" "$redirect_port" "$base/release/" >"$work/redirect.log" 2>&1 &
+redirect_pid=$!
+tries=0
+until curl -s -o /dev/null "http://127.0.0.1:$redirect_port/x"; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 50 ]; then
+        echo "the redirect server did not start" >&2
+        exit 2
+    fi
+    sleep 0.1
+done
+check "the redirect server really redirects to the release (curl -L follows it)" sh -c \
+    "curl -fsSL 'http://127.0.0.1:$redirect_port/mirrust-linux-x86_64' | grep -q 'fake binary'"
+run_install MIRRUST_BASE_URL="http://127.0.0.1:$redirect_port" -- --prefix "$work/bin-redirect"
+kill "$redirect_pid" 2>/dev/null
+check "a redirect to plain http is refused and nothing is installed" sh -c \
+    "[ $status -ne 0 ] && grep -q 'failed' '$work/out' && [ ! -e '$work/bin-redirect' ]"
 
 # --- unsupported systems ---
 
