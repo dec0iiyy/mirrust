@@ -211,6 +211,59 @@ async fn head_gets_the_headers_of_the_body_and_no_data_frames() {
     server.await.expect("join").expect("serve");
 }
 
+/// `(type, flags, stream, payload)` of each frame in `bytes`.
+fn frames_of(mut bytes: &[u8]) -> Vec<(u8, u8, u32, Vec<u8>)> {
+    let mut frames = Vec::new();
+    while bytes.len() >= 9 {
+        let len = usize::from(bytes[0]) << 16 | usize::from(bytes[1]) << 8 | usize::from(bytes[2]);
+        let stream = u32::from_be_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);
+        frames.push((bytes[3], bytes[4], stream, bytes[9..9 + len].to_vec()));
+        bytes = &bytes[9 + len..];
+    }
+    frames
+}
+
+fn raw_frame(kind: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
+    let len = u32::try_from(payload.len()).expect("small");
+    let mut out = len.to_be_bytes()[1..].to_vec();
+    out.extend([kind, flags]);
+    out.extend(stream.to_be_bytes());
+    out.extend(payload);
+    out
+}
+
+#[tokio::test]
+async fn settings_and_ping_are_acknowledged() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let (mut client_io, mut server_io) = tokio::io::duplex(1 << 16);
+    let mut input = http2::PREFACE.to_vec();
+    input.extend(raw_frame(0x4, 0, 0, &[]));
+    input.extend(raw_frame(0x6, 0, 0, b"pingdata"));
+    // GET / https: the static table entries 2, 7 and 4, with END_STREAM and END_HEADERS.
+    input.extend(raw_frame(0x1, 0x5, 1, &[0x82, 0x87, 0x84]));
+    client_io.write_all(&input).await.expect("write");
+    let result = serve(&mut server_io, &[], Response::default(), |_| {
+        Response::default()
+    })
+    .await;
+    result.expect("serve");
+    drop(server_io);
+    let mut output = Vec::new();
+    client_io.read_to_end(&mut output).await.expect("read");
+
+    let frames = frames_of(&output);
+    let acks: Vec<_> = frames
+        .iter()
+        .filter(|(kind, flags, ..)| matches!(kind, 0x4 | 0x6) && flags & 1 == 1)
+        .map(|(kind, _, stream, payload)| (*kind, *stream, payload.clone()))
+        .collect();
+    assert_eq!(
+        acks,
+        [(0x4, 0, vec![]), (0x6, 0, b"pingdata".to_vec())],
+        "RFC 9113 sections 6.5.3 and 6.7: {frames:?}"
+    );
+}
+
 #[tokio::test]
 async fn garbage_is_an_error_not_a_panic() {
     use tokio::io::AsyncWriteExt as _;

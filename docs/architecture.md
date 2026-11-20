@@ -76,9 +76,10 @@ accept ──► read ClientHello records ──► ALPN acme-tls/1? ──yes�
 4. **Serve by ALPN.**
    - `h2`: `crates/http2` reads the preface, sends the server SETTINGS (initial window 1048576,
      100 concurrent streams, header list 65536), reads frames until the first `END_STREAM`
-     without acknowledging the client's SETTINGS (the parser refuses more than 64 KiB of input
+     without answering them as they come (the parser refuses more than 64 KiB of input
      or more than 256 frames: `http2::DEFAULT_MAX_INPUT`, `http2::MAX_FRAMES`), builds the
-     report, and answers on the last HEADERS frame's stream with HEADERS, the body in 1024-byte DATA frames, an empty DATA with
+     report, and answers with an ACK for each SETTINGS and PING frame the client sent, then, on the last HEADERS frame's stream,
+     HEADERS, the body in 1024-byte DATA frames, an empty DATA with
      `END_STREAM`, and GOAWAY. It waits 500 ms and closes.
    - anything else: HTTP/1.1. The request is read until the header block ends or 1024 bytes are
      in, parsed, answered with `Content-Length` and `Connection: close`, and the connection is closed. Two CRLFs follow
