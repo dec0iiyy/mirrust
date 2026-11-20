@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mirrust</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23151514'/%3E%3Cpath d='M14 8 6 16l8 8zM18 8l8 8-8 8z' fill='%23ededea'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f3ef;
+    --surface: #ffffff;
+    --sunken: #f6f6f2;
+    --ink: #151514;
+    --muted: #66665f;
+    --faint: #a3a39b;
+    --rule: #e2e2db;
+    --good: #1a7f37;
+    --good-bg: #e6f4ea;
+    --warn: #9a6700;
+    --warn-bg: #fff4d6;
+    --bad: #c22f2f;
+    --bad-bg: #fde8e8;
+    --neutral-bg: #eeeee9;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0e0d;
+      --surface: #181817;
+      --sunken: #121211;
+      --ink: #ededea;
+      --muted: #9d9d96;
+      --faint: #5f5f59;
+      --rule: #2a2a28;
+      --good: #4cc26b;
+      --good-bg: #13291a;
+      --warn: #e3b341;
+      --warn-bg: #2d2410;
+      --bad: #f47067;
+      --bad-bg: #2f1514;
+      --neutral-bg: #242422;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  main { max-width: 1120px; margin: 0 auto; padding: 28px 24px 64px; }
+  @media (max-width: 640px) { main { padding: 18px 12px 48px; } }
+  a { color: inherit; text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--ink); }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .empty { color: var(--faint); }
+
+  /* Top line */
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 24px; margin-bottom: 20px; }
+  .wordmark { font: 700 18px/1 var(--mono); }
+  .wordmark span { color: var(--muted); font: 400 14px var(--sans); margin-left: 10px; }
+  .conn { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 4px;
+    font: 600 12px/1.6 var(--sans); background: var(--neutral-bg); color: var(--ink); white-space: nowrap;
+  }
+  .tag.mono { font: 600 12px/1.6 var(--mono); }
+  .tag.good { background: var(--good-bg); color: var(--good); }
+  .tag.warn { background: var(--warn-bg); color: var(--warn); }
+  .tag.bad { background: var(--bad-bg); color: var(--bad); }
+
+  /* Panels */
+  .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; margin-bottom: 16px; }
+  .panel > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 16px 20px 0; }
+  .panel > header h2 { margin: 0; font: 700 17px/1.3 var(--sans); }
+  .panel > header p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  /* Verdict */
+  .verdict { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 28px; align-items: center; }
+  .score { font: 700 72px/1 var(--mono); letter-spacing: -0.04em; }
+  .score small { font: 400 16px var(--sans); color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+  .score.good { color: var(--good); } .score.warn { color: var(--warn); } .score.bad { color: var(--bad); }
+  .verdict h2 { margin: 0 0 4px; font: 700 20px/1.3 var(--sans); }
+  .verdict p { margin: 0; color: var(--muted); font-size: 14px; }
+  .verdict .who { margin-top: 8px; color: var(--ink); font-size: 14px; }
+  .verdict .who b { font-weight: 600; }
+  .checks { margin-top: 18px; border-top: 1px solid var(--rule); }
+  .chk { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 2px 14px; padding: 10px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+  .chk:last-child { border-bottom: 0; padding-bottom: 0; }
+  .chk .t { font-weight: 600; font-size: 14px; }
+  .chk .d { grid-column: 2; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .chk.fail .d, .chk.warn .d { color: var(--ink); }
+  .chk .tag { justify-self: start; }
+  @media (max-width: 640px) {
+    .verdict { grid-template-columns: minmax(0, 1fr); }
+    .score { font-size: 56px; }
+    .chk { grid-template-columns: minmax(0, 1fr); }
+    .chk .d { grid-column: 1; }
+  }
+  .panel > .body { padding: 14px 20px 20px; }
+  @media (max-width: 640px) {
+    .panel > header { padding: 14px 14px 0; }
+    .panel > .body { padding: 12px 14px 16px; }
+  }
+
+  /* JA4 hero */
+  .hero .label { display: flex; gap: 12px; align-items: baseline; color: var(--muted); font-size: 13px; }
+  .ja4 { font: 700 clamp(20px, 4vw, 38px)/1.15 var(--mono); letter-spacing: -0.02em; margin: 6px 0 18px; overflow-wrap: anywhere; }
+  .ja4 .sep { color: var(--faint); font-weight: 400; }
+  .parts { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(2, minmax(0, 2fr)); gap: 8px; }
+  .part { background: var(--sunken); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+  .part .v { font: 700 16px/1.3 var(--mono); overflow-wrap: anywhere; }
+  .part .k { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+  @media (max-width: 760px) {
+    .parts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .part.wide { grid-column: 1 / -1; }
+  }
+
+  /* Summary tiles */
+  .signals { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .signal { border: 1px solid var(--rule); border-left-width: 4px; border-radius: 6px; padding: 12px 14px; min-width: 0; }
+  .signal.good { border-left-color: var(--good); }
+  .signal.warn { border-left-color: var(--warn); }
+  .signal.bad { border-left-color: var(--bad); }
+  .signal .k { font-size: 12px; color: var(--muted); }
+  .signal .v { font: 700 16px/1.35 var(--sans); margin: 2px 0; overflow-wrap: anywhere; }
+  .signal .v.mono { font: 700 15px/1.35 var(--mono); }
+  .signal .d { font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+  /* Fingerprint rows */
+  .fp { display: grid; grid-template-columns: 170px minmax(0, 1fr) auto; gap: 4px 20px; padding: 14px 0; border-top: 1px solid var(--rule); align-items: start; }
+  .fp:first-child { border-top: 0; padding-top: 4px; }
+  .fp .name { font: 700 15px/1.4 var(--sans); }
+  .fp .name small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+  .fp .value { font: 600 16px/1.4 var(--mono); overflow-wrap: anywhere; }
+  .fp details { margin-top: 6px; }
+  .fp details summary { font-size: 13px; color: var(--muted); cursor: pointer; width: max-content; }
+  .fp details summary:hover { color: var(--ink); }
+  .fp .raw { margin-top: 6px; background: var(--sunken); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; font: 12px/1.6 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  .fp .note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .fp .note.flag { color: var(--warn); }
+  @media (max-width: 640px) {
+    .fp { grid-template-columns: minmax(0, 1fr) auto; }
+    .fp .name { grid-column: 1 / -1; }
+  }
+
+  button.copy {
+    font: 600 12px var(--sans); color: var(--muted); background: var(--sunken); border: 1px solid var(--rule);
+    border-radius: 4px; padding: 3px 9px; cursor: pointer;
+  }
+  button.copy:hover { color: var(--ink); border-color: var(--faint); }
+  button.copy.done { color: var(--good); border-color: var(--good); }
+
+  /* Ciphers */
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .legend span { display: inline-flex; gap: 6px; align-items: center; }
+  ol.ciphers { margin: 0; padding: 0; list-style: none; columns: 2 340px; column-gap: 28px; }
+  ol.ciphers li { break-inside: avoid; display: flex; gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--rule); font: 13px/1.5 var(--mono); }
+  ol.ciphers li .n { overflow-wrap: anywhere; flex: 1; min-width: 0; }
+  ol.ciphers li .tag { font-size: 11px; padding: 0 6px; }
+  .idx { color: var(--faint); font: 12px var(--mono); font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; flex: none; }
+  .grease, .grease b { color: var(--faint); }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font: 600 12px var(--sans); color: var(--muted); padding: 0 14px 8px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  td { padding: 9px 14px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.idx { padding-right: 10px; width: 2ch; }
+  td.ext-name { width: 32%; overflow-wrap: anywhere; }
+  td.ext-name b { font-weight: 600; }
+  td.ext-name .id { color: var(--muted); font: 12px var(--mono); margin-left: 6px; }
+  td.detail { overflow-wrap: anywhere; min-width: 240px; font-family: var(--mono); font-size: 12.5px; }
+  td.detail .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; }
+  td.detail .key { color: var(--muted); font-family: var(--sans); font-size: 12px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+  td.pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12.5px; }
+  td.frame { font-weight: 600; white-space: nowrap; }
+  @media (max-width: 640px) {
+    table.ext thead { display: none; }
+    table.ext tr { display: grid; grid-template-columns: 3ch minmax(0, 1fr); border-bottom: 1px solid var(--rule); padding: 9px 0; }
+    table.ext td { border: 0; padding: 0; width: auto; min-width: 0; }
+    table.ext td.detail { grid-column: 2; margin-top: 4px; }
+  }
+  .long { cursor: pointer; text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
+  .long:hover { text-decoration-color: var(--ink); }
+
+  dl.facts { margin: 0; display: grid; grid-template-columns: 140px minmax(0, 1fr); }
+  dl.facts dt, dl.facts dd { padding: 8px 0; border-top: 1px solid var(--rule); margin: 0; }
+  dl.facts dt:first-of-type, dl.facts dd:first-of-type { border-top: 0; padding-top: 0; }
+  dl.facts dt { font-weight: 600; font-size: 14px; }
+  dl.facts dd { font: 13px/1.55 var(--mono); overflow-wrap: anywhere; }
+  @media (max-width: 640px) {
+    dl.facts { grid-template-columns: minmax(0, 1fr); }
+    dl.facts dd { border-top: 0; padding-top: 0; }
+  }
+
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+  .two > .panel { margin-bottom: 0; }
+  @media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+
+  h3 { font: 600 13px var(--sans); color: var(--muted); margin: 18px 0 8px; }
+  h3:first-child { margin-top: 0; }
+  pre.block { margin: 0; background: var(--sunken); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ua { font: 14px/1.5 var(--mono); overflow-wrap: anywhere; margin: 0; }
+  details.json summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  details.json pre { margin-top: 12px; max-height: 560px; overflow: auto; }
+
+  footer { margin-top: 20px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 20px; justify-content: space-between; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div class="wordmark">mirrust<span>how your client looks on the wire</span></div>
+    <div class="conn" id="conn"></div>
+  </div>
+  <div id="content"><p class="muted">Loading…</p></div>
+</main>
+<script>
+"use strict";
+const embedded = null/*DATA*/;
+
+const TLS_VERSIONS = { 769: "TLS 1.0", 770: "TLS 1.1", 771: "TLS 1.2", 772: "TLS 1.3" };
+const JA4_VERSIONS = { 13: "TLS 1.3", 12: "TLS 1.2", 11: "TLS 1.1", 10: "TLS 1.0", s3: "SSL 3.0", s2: "SSL 2.0", d1: "DTLS 1.0", d2: "DTLS 1.2", d3: "DTLS 1.3", "00": "unknown" };
+const JA4_TRANSPORTS = { t: "TCP", q: "QUIC", d: "DTLS" };
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (key === "class") node.className = value;
+    else node.setAttribute(key, value);
+  }
+  for (const child of children.flat(Infinity)) {
+    if (child == null || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+function orEmpty(value) {
+  return value ? value : el("span", { class: "empty" }, "—");
+}
+
+function copyButton(value) {
+  if (!value) return el("span");
+  const button = el("button", { class: "copy", type: "button" }, "Copy");
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const area = el("textarea", {}, value);
+      document.body.append(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    button.textContent = "Copied";
+    button.classList.add("done");
+    setTimeout(() => { button.textContent = "Copy"; button.classList.remove("done"); }, 1400);
+  });
+  return button;
+}
+
+function tag(text, kind, mono) {
+  return el("span", { class: ["tag", kind, mono ? "mono" : ""].filter(Boolean).join(" ") }, text);
+}
+
+function panel(title, caption, ...body) {
+  return el("div", { class: "panel" },
+    el("header", {}, el("h2", {}, title), caption ? el("p", {}, caption) : null),
+    el("div", { class: "body" }, body));
+}
+
+function isGrease(name) { return /GREASE/i.test(String(name)); }
+
+/** Drops the " (123)" id appended to registry names. */
+function bare(name) { return String(name).replace(/\s*\(\d+\)$/, ""); }
+
+/** The extension whose name starts with `prefix`, e.g. "key_share". */
+function extension(tls, prefix) {
+  return (tls.extensions || []).find((e) => String(e.name || "").startsWith(prefix));
+}
+
+/** Cipher suite strength: "bad" for broken, "warn" for no forward secrecy or CBC, else null. */
+function cipherKind(name) {
+  if (isGrease(name) || !/^TLS_/.test(name)) return null;
+  if (/RC4|3DES|_DES_|NULL|EXPORT|_MD5$|anon/.test(name)) return "bad";
+  if (/^TLS_RSA_|_CBC_/.test(name)) return "warn";
+  return null;
+}
+
+/** Splits part a of JA4 into its fields with a caption for each. */
+function ja4Fields(ja4) {
+  const [a, b, c] = String(ja4 || "").split("_");
+  const m = /^([tqd])(\w\w)([di])(\d\d)(\d\d)(\w\w)$/.exec(a || "");
+  if (!m || c === undefined) return [];
+  const [, transport, version, sni, ciphers, extensions, alpn] = m;
+  return [
+    [transport, JA4_TRANSPORTS[transport] || "transport"],
+    [version, JA4_VERSIONS[version] || "version"],
+    [sni, sni === "d" ? "SNI sent" : "no SNI"],
+    [ciphers, "cipher suites"],
+    [extensions, "extensions"],
+    [alpn, alpn === "00" ? "no ALPN" : "ALPN, first and last char"],
+    [b, "hash of sorted cipher suites"],
+    [c, "hash of sorted extensions and signature algorithms"],
+  ];
+}
+
+function hero(tls) {
+  const [a, b, c] = String(tls.ja4 || "").split("_");
+  const value = c === undefined
+    ? [tls.ja4 || "—"]
+    : [a, el("span", { class: "sep" }, "_"), b, el("span", { class: "sep" }, "_"), c];
+  return el("div", { class: "panel hero" },
+    el("div", { class: "body", style: "padding-top: 18px" },
+      el("div", { class: "label" }, el("span", {}, "JA4 fingerprint, FoxIO specification"), copyButton(tls.ja4)),
+      el("div", { class: "ja4" }, value),
+      el("div", { class: "parts" }, ja4Fields(tls.ja4).map(([v, k], i) =>
+        el("div", { class: i > 5 ? "part wide" : "part" }, el("div", { class: "v" }, v), el("div", { class: "k" }, k)))),
+      tls.ja4_r ? el("div", { class: "fp", style: "display: block; border: 0; padding: 10px 0 0" },
+        el("details", {}, el("summary", {}, "Show the string before hashing (JA4_r)"), el("div", { class: "raw" }, tls.ja4_r))) : null));
+}
+
+function signal(kind, key, value, detail, mono) {
+  return el("div", { class: `signal ${kind || ""}` },
+    el("div", { class: "k" }, key),
+    el("div", { class: mono ? "v mono" : "v" }, value),
+    detail ? el("div", { class: "d" }, detail) : null);
+}
+
+/** What stands out about this client, read from the parsed ClientHello. */
+function signals(report) {
+  const tls = report.tls || {};
+  const ciphers = tls.ciphers || [];
+  const out = [];
+
+  const versions = (extension(tls, "supported_versions")?.versions || []).filter((v) => !isGrease(v));
+  const best = versions[0] || TLS_VERSIONS[tls.tls_version_negotiated] || "unknown";
+  out.push(signal(best === "TLS 1.3" ? "good" : "warn", "Highest TLS version offered", best,
+    versions.length ? `Offers ${versions.join(", ")}` : "No supported_versions extension"));
+
+  const groups = (extension(tls, "supported_groups")?.supported_groups || []).filter((g) => !isGrease(g));
+  const shares = (extension(tls, "key_share")?.shared_keys || []).flatMap((k) => Object.keys(k)).filter((g) => !isGrease(g));
+  const pq = groups.find((g) => /MLKEM|Kyber/i.test(g));
+  out.push(pq
+    ? signal("good", "Post-quantum key exchange", "Yes",
+        `${bare(pq)}${shares.some((s) => /MLKEM|Kyber/i.test(s)) ? ", key share sent" : ", offered without a key share"}`)
+    : signal("warn", "Post-quantum key exchange", "No",
+        groups.length ? `Groups: ${groups.map(bare).join(", ")}` : "No supported_groups extension"));
+
+  const ech = (tls.extensions || []).find((e) => /\(65037\)$/.test(e.name || ""));
+  out.push(ech
+    ? signal("good", "Encrypted ClientHello", "Sent", "Hides the real server name from the network; Chrome sends a GREASE one when the site has no ECH key")
+    : signal(null, "Encrypted ClientHello", "Not sent", "The server name, if any, travels in clear"));
+
+  const sni = extension(tls, "server_name");
+  out.push(sni
+    ? signal(null, "Server name (SNI)", sni.server_name || "sent", "Visible on the path unless ECH hides it", true)
+    : signal(null, "Server name (SNI)", "None", "Clients send no SNI when connecting to an IP address"));
+
+  const alpn = extension(tls, "application_layer_protocol_negotiation")?.protocols || [];
+  out.push(signal(null, "ALPN", alpn.length ? alpn.join(", ") : "None",
+    `This request used ${report.http_version || "?"}`, true));
+
+  const real = ciphers.filter((c) => !isGrease(c));
+  const weak = real.filter((c) => cipherKind(c));
+  const broken = real.filter((c) => cipherKind(c) === "bad");
+  out.push(signal(broken.length ? "bad" : weak.length ? "warn" : "good", "Legacy cipher suites",
+    weak.length ? `${weak.length} of ${real.length}` : "None",
+    broken.length ? `${broken.length} broken (RC4, 3DES, MD5…); the rest lack forward secrecy or use CBC`
+      : weak.length ? "No forward secrecy or CBC mode, kept for old servers" : "Only AEAD suites with forward secrecy"));
+
+  const grease = ciphers.some(isGrease);
+  out.push(signal(null, "GREASE", grease ? "Yes" : "No",
+    grease ? "Random reserved values, typical of Chrome and other BoringSSL clients" : "No reserved values, typical of OpenSSL, Go, rustls and Firefox"));
+
+  return out;
+}
+
+const VERDICTS = {
+  consistent: ["good", "Consistent", "Every layer the server could see agrees with what this client claims to be."],
+  suspicious: ["warn", "Suspicious", "Something does not add up. A strict filter would look closer at this client."],
+  inconsistent: ["bad", "Inconsistent", "The layers contradict each other. This client is easy to single out."],
+};
+const STATUS = { fail: ["bad", "Mismatch", 0], warn: ["warn", "Unusual", 1], pass: ["good", "OK", 2], skip: ["", "Not measured", 3] };
+
+/** The score, who the client looks like, and every check with what it found; problems first. */
+function verdict(report) {
+  const audit = report.audit;
+  if (!audit) return null;
+  const [kind, title, summary] = VERDICTS[audit.verdict] || ["", audit.verdict, ""];
+  const client = report.client || {};
+  const name = [client.family, client.version].filter(Boolean).join(" ");
+  const sameLists = (audit.checks || []).some((c) => c.id === "tls_known" && c.status === "pass");
+  const looks = client.match === "exact" || (client.match === "ciphers" && sameLists) ? name
+    : client.match === "ciphers" ? `close to ${name}`
+    : "no known client";
+  const claims = client.user_agent_family && client.user_agent_family !== "unknown" ? client.user_agent_family : "nothing we recognise";
+  const checks = [...(audit.checks || [])].sort((a, b) => (STATUS[a.status] || STATUS.skip)[2] - (STATUS[b.status] || STATUS.skip)[2]);
+  const count = (status) => checks.filter((c) => c.status === status).length;
+  const counts = [[count("fail"), "mismatch"], [count("warn"), "unusual"], [count("pass"), "ok"], [count("skip"), "not measured"]]
+    .filter(([n]) => n).map(([n, label]) => `${n} ${label}`).join(" · ");
+  return el("div", { class: "panel" }, el("div", { class: "body", style: "padding-top: 20px" },
+    el("div", { class: "verdict" },
+      el("div", { class: `score ${kind}` }, String(audit.score), el("small", {}, "/ 100")),
+      el("div", {},
+        el("h2", {}, title),
+        el("p", {}, summary),
+        el("p", { class: "who" }, "TLS stack: ", el("b", {}, looks), ". User-Agent claims: ", el("b", {}, claims), ". ", el("span", { class: "muted" }, counts)))),
+    el("div", { class: "checks" }, checks.map((c) => {
+      const [tagKind, label] = STATUS[c.status] || STATUS.skip;
+      return el("div", { class: `chk ${c.status}` },
+        tag(label, tagKind),
+        el("div", { class: "t" }, c.title),
+        el("div", { class: "d" }, c.detail));
+    }))));
+}
+
+function fingerprint(name, caption, value, raw, note, flagged) {
+  return el("div", { class: "fp" },
+    el("div", { class: "name" }, name, caption ? el("small", {}, caption) : null),
+    el("div", {},
+      el("div", { class: "value" }, orEmpty(value)),
+      note ? el("div", { class: "note" + (flagged ? " flag" : "") }, note) : null,
+      raw ? el("details", {}, el("summary", {}, "Show the string"), el("div", { class: "raw" }, raw)) : null),
+    copyButton(value));
+}
+
+/** Long hex (key shares, ECH payloads) shows its start and size; a click expands it. */
+function longHex(value) {
+  const short = `${value.slice(0, 16)}… (${value.length / 2} bytes)`;
+  const span = el("span", { class: "long", title: "Show all" }, short);
+  span.addEventListener("click", () => {
+    span.textContent = span.textContent === value ? short : value;
+  });
+  return span;
+}
+
+/** Renders an extension detail value as inline nodes. */
+function describe(value) {
+  if (value == null || value === "") return [el("span", { class: "empty" }, "—")];
+  if (typeof value === "string" && value.length > 48 && /^[0-9a-f]+$/i.test(value)) return [longHex(value)];
+  if (Array.isArray(value)) {
+    if (value.length === 0) return [el("span", { class: "empty" }, "—")];
+    return value.flatMap((item, i) => (i ? [", ", ...describe(item)] : describe(item)));
+  }
+  if (typeof value === "object") {
+    return Object.entries(value).flatMap(([key, item], i) => [...(i ? ["; "] : []), `${key} `, ...describe(item)]);
+  }
+  return [String(value)];
+}
+
+function extensionsTable(extensions) {
+  const rows = extensions.map((ext, i) => {
+    const { name, ...rest } = ext || {};
+    const m = /^(.*?)\s*\((\d+)\)$/.exec(name || "");
+    const label = m ? [el("b", {}, m[1]), el("span", { class: "id" }, m[2])] : [el("b", {}, name || "?")];
+    const entries = Object.entries(rest);
+    const detail = entries.length
+      ? el("div", { class: "kv" }, entries.map(([key, value]) => [
+          el("span", { class: "key" }, key.replace(/_/g, " ")),
+          key === "parameters" && Array.isArray(value)
+            ? el("span", { style: "white-space: pre-wrap" }, value.map((item) => `${item.name} = ${item.value === "" ? "(set)" : item.value}`).join("\n"))
+            : el("span", {}, describe(value)),
+        ]))
+      : "";
+    return el("tr", {},
+      el("td", { class: "idx" }, String(i + 1)),
+      el("td", { class: "ext-name" + (isGrease(name) ? " grease" : "") }, label),
+      el("td", { class: "detail" }, detail));
+  });
+  return el("div", { class: "table-wrap" },
+    el("table", { class: "ext" },
+      el("thead", {}, el("tr", {}, el("th", {}, "#"), el("th", {}, "Extension"), el("th", {}, "Contents"))),
+      el("tbody", {}, rows)));
+}
+
+function cipherList(ciphers) {
+  return el("ol", { class: "ciphers" }, ciphers.map((name, i) => {
+    const kind = cipherKind(name);
+    return el("li", { class: isGrease(name) ? "grease" : "" },
+      el("span", { class: "idx" }, String(i + 1)),
+      el("span", { class: "n" }, name),
+      kind === "bad" ? tag("broken", "bad") : kind === "warn" ? tag("legacy", "warn") : null);
+  }));
+}
+
+function framesTable(frames) {
+  const rows = frames.map((frame) => {
+    const detail = [];
+    if (frame.settings) detail.push(frame.settings.join("\n"));
+    if (frame.increment) detail.push(`increment ${frame.increment}`);
+    if (frame.priority) detail.push(`weight ${frame.priority.weight}, depends on ${frame.priority.depends_on}, exclusive ${frame.priority.exclusive}`);
+    if (frame.headers) detail.push(frame.headers.join("\n"));
+    if (frame.goaway) detail.push(JSON.stringify(frame.goaway));
+    return el("tr", {},
+      el("td", { class: "frame" }, frame.frame_type || "?"),
+      el("td", { class: "num" }, String(frame.stream_id || 0)),
+      el("td", { class: "num" }, String(frame.length || 0)),
+      el("td", { class: "pre muted" }, (frame.flags || []).join("\n") || ""),
+      el("td", { class: "pre" }, detail.join("\n")));
+  });
+  return el("div", { class: "table-wrap" },
+    el("table", {},
+      el("thead", {}, el("tr", {}, ["Frame", "Stream", "Length", "Flags", "Payload"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows)));
+}
+
+function render(report) {
+  const tls = report.tls || {};
+  const h2 = report.http2;
+  const negotiated = TLS_VERSIONS[tls.tls_version_negotiated] || tls.tls_version_negotiated;
+
+  document.getElementById("conn").replaceChildren(
+    tag(report.http_version || "?", "", true),
+    tag(negotiated || "?", "", true),
+    tag(report.ip || "", "", true));
+
+  const content = [verdict(report), hero(tls)];
+
+  content.push(panel("At a glance", "what stands out in the ClientHello", el("div", { class: "signals" }, signals(report))));
+
+  const peetDiffers = tls.ja4_peet && tls.ja4_peet !== tls.ja4;
+  content.push(panel("Fingerprints", "other ways to reduce the same connection to one value",
+    fingerprint("JA4_o", "original order", tls.ja4_o, tls.ja4_ro),
+    fingerprint("JA3", "2017, MD5", tls.ja3_hash, tls.ja3,
+      "Keeps extension order, so it changes on every connection for clients that shuffle extensions, such as Chrome."),
+    fingerprint("PeetPrint", "tls.peet.ws, MD5", tls.peetprint_hash, tls.peetprint),
+    h2
+      ? fingerprint("Akamai", "HTTP/2", h2.akamai_fingerprint_hash, h2.akamai_fingerprint)
+      : report.http3
+        ? fingerprint("HTTP/3", "settings | streams, MD5", report.http3.fingerprint_hash, report.http3.fingerprint,
+            "The client's HTTP/3 SETTINGS and the stream types it opened, in order.")
+        : fingerprint("Akamai", "HTTP/2", "", null, `Needs an HTTP/2 connection; this request used ${report.http_version || "HTTP/1.1"}.`),
+    fingerprint("JA4 by tls.peet.ws", "for comparison", tls.ja4_peet, tls.ja4_peet_r,
+      peetDiffers
+        ? "Differs from the specification above: tls.peet.ws always writes d, does not zero-pad counts and drops unknown ALPN."
+        : "Same as the specification value for this client.",
+      peetDiffers)));
+
+  const ciphers = tls.ciphers || [];
+  const extensions = tls.extensions || [];
+  content.push(panel("Cipher suites", `${ciphers.length}, in the client's order of preference`,
+    el("div", { class: "legend" },
+      el("span", {}, tag("legacy", "warn"), "no forward secrecy or CBC"),
+      el("span", {}, tag("broken", "bad"), "RC4, 3DES, MD5, export"),
+      el("span", { class: "grease" }, "grey: GREASE")),
+    cipherList(ciphers)));
+
+  content.push(panel("Extensions", `${extensions.length}, in the order sent`,
+    extensionsTable(extensions)));
+
+  if (h2 && h2.sent_frames) {
+    content.push(panel("HTTP/2 frames", "sent before the first response; the Akamai fingerprint is built from them",
+      framesTable(h2.sent_frames)));
+  } else if (report.http3 || report.quic) {
+    const quic = report.quic || {};
+    const h3 = report.http3 || {};
+    const named = (items) => (items || []).map((item) => `${item.name}${item.value === undefined ? "" : ` = ${item.value}`}`).join("\n");
+    content.push(panel("QUIC and HTTP/3", "from the Initial packets and the control stream",
+      el("dl", { class: "facts" },
+        el("dt", {}, "QUIC version"), el("dd", {}, orEmpty(quic.version)),
+        el("dt", {}, "Connection IDs"), el("dd", {}, quic.dcid_length === undefined ? orEmpty("") : `destination ${quic.dcid_length} bytes, source ${quic.scid_length} bytes`),
+        el("dt", {}, "Token"), el("dd", {}, quic.token_length ? `${quic.token_length} bytes` : "none"),
+        el("dt", {}, "Initial datagrams"), el("dd", {}, orEmpty((quic.initial_datagram_sizes || []).map((n) => `${n} bytes`).join(", "))),
+        el("dt", {}, "SETTINGS"), el("dd", { style: "white-space: pre-wrap" }, orEmpty(named(h3.settings))),
+        el("dt", {}, "Streams opened"), el("dd", {}, orEmpty((h3.streams || []).map((stream) => stream.name).join(", "))))));
+  } else if (report.http1 && report.http1.headers) {
+    content.push(panel("HTTP/1.1 headers", "in the order received", el("pre", { class: "block" }, report.http1.headers.join("\n"))));
+  }
+
+  const api = [
+    ["/api/all", "everything on this page"],
+    ["/api/tls", "TLS only"],
+    ["/api/clean", "fingerprints only"],
+    ["/api/raw", "raw ClientHello bytes"],
+  ];
+  content.push(el("div", { class: "two" },
+    panel("Connection", "new on every connection",
+      report.user_agent ? [el("h3", {}, "User agent"), el("p", { class: "ua" }, report.user_agent), el("h3", {}, "Session")] : null,
+      el("dl", { class: "facts" },
+        el("dt", {}, "Client random"), el("dd", {}, orEmpty(tls.client_random)),
+        el("dt", {}, "Session ID"), el("dd", {}, orEmpty(tls.session_id)),
+        el("dt", {}, "Record version"), el("dd", {}, orEmpty(TLS_VERSIONS[tls.tls_version_record] || tls.tls_version_record)),
+        el("dt", {}, "Negotiated"), el("dd", {}, orEmpty(negotiated)))),
+    panel("API", "the same data as JSON",
+      el("dl", { class: "facts" }, api.map(([path, what]) => [
+        el("dt", {}, el("a", { class: "mono", href: path }, path)),
+        el("dd", { style: "font-family: var(--sans); font-size: 14px" }, what),
+      ])),
+      el("h3", {}, "From a terminal"),
+      el("pre", { class: "block" }, `curl -s ${location.origin}/api/clean`))));
+
+  content.push(el("div", { class: "panel" }, el("div", { class: "body", style: "padding-top: 16px" },
+    el("details", { class: "json" }, el("summary", {}, "Full JSON of this response"),
+      el("pre", { class: "block" }, JSON.stringify(report, null, 2))))));
+
+  content.push(el("footer", {},
+    el("span", {}, "mirrust, fingerprints compatible with tls.peet.ws"),
+    el("span", {}, "Reload to see a fresh connection.")));
+
+  document.getElementById("content").replaceChildren(...content);
+}
+
+if (embedded && typeof embedded === "object") {
+  render(embedded);
+} else {
+  fetch("/api/all").then((r) => r.json()).then(render).catch((error) => {
+    document.getElementById("content").replaceChildren(el("p", { class: "muted" }, `Could not load the report: ${error}`));
+  });
+}
+</script>
+</body>
+</html>
