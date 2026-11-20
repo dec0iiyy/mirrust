@@ -75,12 +75,37 @@ accept ──► read ClientHello records ──► ALPN acme-tls/1? ──yes�
    dataset match, the Akamai string and the request headers.
 4. **Serve by ALPN.**
    - `h2`: `crates/http2` reads the preface, sends the server SETTINGS (initial window 1048576,
-     100 concurrent streams, header list 65536), reads frames until the first `END_STREAM`
-     without answering them as they come (the parser refuses more than 64 KiB of input
-     or more than 256 frames: `http2::DEFAULT_MAX_INPUT`, `http2::MAX_FRAMES`), builds the
-     report, and answers with an ACK for each SETTINGS and PING frame the client sent, then, on the last HEADERS frame's stream,
-     HEADERS, the body in 1024-byte DATA frames, an empty DATA with
-     `END_STREAM`, and GOAWAY. It waits 500 ms and closes.
+     100 concurrent streams, header list 65536), and reads frames until the first `END_STREAM`
+     (the parser refuses more than 64 KiB of input or more than 256 frames:
+     `http2::DEFAULT_MAX_INPUT`, `http2::MAX_FRAMES`). Each SETTINGS frame and each PING is
+     answered with its ACK as it arrives (RFC 9113 sections 6.5.3 and 6.7). The report is
+     built, and on the last HEADERS frame's stream the server sends HEADERS, the body in DATA
+     frames of at most 1024 bytes, an empty DATA with `END_STREAM`, and GOAWAY. It waits
+     500 ms and closes.
+     **Flow control.** The body is sent within the client's windows (RFC 9113 section 6.9):
+     65,535 bytes for the connection and for the stream unless the client's SETTINGS
+     (`INITIAL_WINDOW_SIZE`) and `WINDOW_UPDATE` frames say otherwise. A body that fits the
+     windows set before the request ended goes out in one write; that is every answer to an
+     ordinary request (a report is 7 to 9 KB, the page with it about 40 KB). Otherwise the
+     server sends what fits and reads the
+     client's frames until a `WINDOW_UPDATE` or a new `INITIAL_WINDOW_SIZE` opens the window,
+     acknowledging SETTINGS and PING meanwhile; `RST_STREAM` on the stream or GOAWAY ends the
+     response early, other frames are ignored, and this reading stops at 64 KiB of input.
+     A window pushed past 2^31 - 1 stays at that value instead of being an error.
+     **Errors.** When the client's frames break the protocol or pass a limit, the server sends
+     `RST_STREAM` for the request (if a HEADERS frame came) and GOAWAY, both with the error
+     code (RFC 9113 sections 5.4.1 and 7: `PROTOCOL_ERROR`, `FLOW_CONTROL_ERROR`,
+     `FRAME_SIZE_ERROR`, `COMPRESSION_ERROR`, or `ENHANCE_YOUR_CALM` for the 64 KiB, 256-frame
+     and header-size limits). The GOAWAY has the highest stream the client used as its last
+     stream and the reason as debug data, such as `input exceeds the size limit`. A lower last
+     stream would tell the client that its request was not looked at, and curl and Go then
+     send it again on a new connection, up to five times for curl, to be refused each time
+     (RFC 9113 section 6.8). The `RST_STREAM` is there because curl and the `h2` crate report
+     its code to their user and not the GOAWAY's. The server then shuts down
+     its sending side and reads and drops what the client still sends for up to 500 ms, because
+     closing a socket with unread input resets the connection and the reset can overtake the
+     GOAWAY. Bytes that are not the HTTP/2 preface get no frame (section 3.4), and neither
+     does a connection that fails or times out.
    - anything else: HTTP/1.1. The request is read until the header block ends or 1024 bytes are
      in, parsed, answered with `Content-Length` and `Connection: close`, and the connection is closed. Two CRLFs follow
      the body, past `Content-Length`, as tls.peet.ws sends them.
@@ -310,11 +335,21 @@ directly.
   [fingerprints.md](fingerprints.md#1-reading-the-clienthello)).
 - **One request per TCP connection.** HTTP/1.1 requests beyond 1024 bytes are truncated (the
   report sees only the first 1024 bytes), keep-alive is not supported, and HTTP/2 answers only
-  the first request.
+  the first request: requests on other streams are not read, and the GOAWAY that follows the
+  response names the answered stream, so a client knows it may send them again on a new
+  connection (RFC 9113 section 6.8). A request with more than 64 KiB of input before its
+  `END_STREAM`, such as a POST with a large body, gets GOAWAY with `ENHANCE_YOUR_CALM` and no
+  report.
+- **The HTTP/2 responder is not a general server.** It does not send `WINDOW_UPDATE` (the
+  64 KiB input limit is reached before the connection's receive window is), does not check
+  the client's frames against the stream states of RFC 9113 section 5.1, and its HPACK encoder
+  does not send a dynamic table size update when the client's `HEADER_TABLE_SIZE` is under
+  4096 (RFC 7541 section 4.2); the response never refers to the dynamic table.
 - **HTTP/2 header blocks split across CONTINUATION frames.** Only the HEADERS frame's own
   fragment is decoded, not the CONTINUATION frames. If the fragment ends inside a field, the
-  request is closed without an answer; if it ends between fields, the request is answered from
-  the fields in the fragment.
+  request is refused with `COMPRESSION_ERROR`; if it ends between fields, the request is
+  answered from the fields in the fragment. A client splits a header block that is larger than
+  16,384 bytes after HPACK, which takes some 20 KB of cookies or other headers.
 - **QUIC limits.** Packet numbers are decoded as if nothing was acknowledged (true for a client's
   first flight); Retry and Version Negotiation packets are ignored and only the length of the
   token is reported; no draft versions. The `quic` object covers the first flight only: nothing

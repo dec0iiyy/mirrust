@@ -34,6 +34,8 @@ pub const MAX_FRAMES: usize = 256;
 pub const MAX_HEADER_BYTES: usize = 64 * 1024;
 
 const FRAME_HEADER_LEN: usize = 9;
+/// The default `SETTINGS_MAX_FRAME_SIZE` (RFC 9113 section 6.5.2), which the server keeps.
+const MAX_FRAME_SIZE: u32 = 16_384;
 
 const DATA: u8 = 0x0;
 const HEADERS: u8 = 0x1;
@@ -73,6 +75,11 @@ pub enum Error {
     BadPreface,
     /// A frame broke a rule `x/net/http2`'s `Framer` enforces; tls.peet.ws closes the connection.
     Frame(&'static str),
+    /// A frame whose length is wrong for its type (RFC 9113 section 4.2); tls.peet.ws closes
+    /// the connection for these too.
+    FrameSize(&'static str),
+    /// A SETTINGS frame asks for a flow-control window over 2^31 - 1 (RFC 9113 section 6.5.2).
+    FlowControl(&'static str),
     /// A HEADERS block failed to decode. tls.peet.ws then stops reading without a word
     /// and the connection hangs until the client gives up.
     HeaderDecode,
@@ -88,7 +95,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BadPreface => f.write_str("missing http/2 connection preface"),
-            Self::Frame(reason) => write!(f, "invalid frame: {reason}"),
+            Self::Frame(reason) | Self::FrameSize(reason) | Self::FlowControl(reason) => {
+                write!(f, "invalid frame: {reason}")
+            }
             Self::HeaderDecode => f.write_str("hpack decoding failed"),
             Self::TooLarge => f.write_str("input exceeds the size limit"),
             Self::HeadersTooLarge => f.write_str("decoded headers exceed the size limit"),
@@ -98,6 +107,22 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl Error {
+    /// The error code (RFC 9113 section 7) of the GOAWAY frame that tells the client about
+    /// this error: `PROTOCOL_ERROR`, `FLOW_CONTROL_ERROR`, `FRAME_SIZE_ERROR`,
+    /// `COMPRESSION_ERROR`, or `ENHANCE_YOUR_CALM` for input over one of the parser's limits.
+    #[must_use]
+    pub fn code(&self) -> u32 {
+        match self {
+            Self::BadPreface | Self::Frame(_) => 0x1,
+            Self::FlowControl(_) => 0x3,
+            Self::FrameSize(_) => 0x6,
+            Self::HeaderDecode => 0x9,
+            Self::TooLarge | Self::HeadersTooLarge | Self::TooManyFrames => 0xb,
+        }
+    }
+}
 
 /// Whether the parser has seen the end of the first request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +146,10 @@ pub struct Parser {
     max_input: usize,
     preface_seen: bool,
     last_header_stream: u32,
+    /// The highest stream identifier in the frames read so far.
+    last_stream: u32,
+    /// The stream of the last HEADERS frame read, decoded or not.
+    request_stream: u32,
     frames: Vec<ParsedFrame>,
     header_frame: Option<usize>,
     /// What is left of [`MAX_HEADER_BYTES`].
@@ -154,6 +183,8 @@ impl Parser {
             max_input,
             preface_seen: false,
             last_header_stream: 0,
+            last_stream: 0,
+            request_stream: 0,
             frames: Vec::new(),
             header_frame: None,
             header_budget: MAX_HEADER_BYTES,
@@ -212,6 +243,10 @@ impl Parser {
             if self.frames.len() >= MAX_FRAMES {
                 return Err(Error::TooManyFrames);
             }
+            self.last_stream = self.last_stream.max(header.stream_id);
+            if header.kind == HEADERS {
+                self.request_stream = header.stream_id;
+            }
             let payload_start = self.pos + FRAME_HEADER_LEN;
             let (mut frame, fragment) =
                 parse_frame(&header, &self.buf[payload_start..payload_end])?;
@@ -248,10 +283,35 @@ impl Parser {
         self.header_frame.and_then(|i| self.frames.get(i))
     }
 
+    /// The highest stream identifier the client used in the frames read so far, the frame
+    /// that caused an error included; 0 before any frame on a stream.
+    ///
+    /// It is the last stream of a GOAWAY frame sent for an error (RFC 9113 section 5.4.1). A
+    /// client sends a request again on a new connection when GOAWAY names a lower stream than
+    /// the request's (section 6.8), and a request the parser refused would be refused again.
+    #[must_use]
+    pub fn last_stream(&self) -> u32 {
+        self.last_stream
+    }
+
+    /// The stream of the last HEADERS frame read, whether or not its header block could be
+    /// decoded: the request the client waits on. 0 before any HEADERS frame.
+    #[must_use]
+    pub fn request_stream(&self) -> u32 {
+        self.request_stream
+    }
+
     /// Whether the full connection preface has arrived.
     #[must_use]
     pub fn preface_seen(&self) -> bool {
         self.preface_seen
+    }
+
+    /// The bytes received after the last frame parsed: what the client sent behind the frame
+    /// that ended its request, or the start of a frame that is not whole yet.
+    #[must_use]
+    pub fn unparsed(&self) -> &[u8] {
+        &self.buf[self.pos..]
     }
 
     /// Consumes the parser and returns its frames.
@@ -315,6 +375,28 @@ impl FrameHeader {
     }
 }
 
+/// The frame at the start of `buf` and its length in bytes, header included; `None` while
+/// `buf` holds only part of a frame.
+///
+/// For the frames a client sends while the response is written: header blocks are not
+/// decoded, frame order is not checked, and a frame over the default `SETTINGS_MAX_FRAME_SIZE`
+/// is an error, because the server never raises it (RFC 9113 section 4.2).
+pub(crate) fn frame_at(buf: &[u8]) -> Result<Option<(ParsedFrame, usize)>, Error> {
+    let Some(raw) = buf.first_chunk::<FRAME_HEADER_LEN>() else {
+        return Ok(None);
+    };
+    let header = FrameHeader::parse(raw);
+    if header.length > MAX_FRAME_SIZE {
+        return Err(Error::FrameSize("frame over SETTINGS_MAX_FRAME_SIZE"));
+    }
+    let end = FRAME_HEADER_LEN + header.length as usize;
+    let Some(payload) = buf.get(FRAME_HEADER_LEN..end) else {
+        return Ok(None);
+    };
+    let (frame, _) = parse_frame(&header, payload)?;
+    Ok(Some((frame, end)))
+}
+
 /// Reads one frame and records it as tls.peet.ws does, except header block
 /// decoding: a HEADERS frame returns its fragment's range within `payload` instead.
 fn parse_frame(
@@ -354,35 +436,28 @@ fn parse_frame(
             }
             let param: &[u8; 5] = payload
                 .try_into()
-                .map_err(|_| Error::Frame("PRIORITY payload is not 5 bytes"))?;
+                .map_err(|_| Error::FrameSize("PRIORITY payload is not 5 bytes"))?;
             frame.priority = Some(priority(*param));
         }
         RST_STREAM => {
-            if payload.len() != 4 || stream_zero {
+            if payload.len() != 4 {
+                return Err(Error::FrameSize("bad RST_STREAM"));
+            }
+            if stream_zero {
                 return Err(Error::Frame("bad RST_STREAM"));
             }
         }
-        SETTINGS => frame.settings = settings(header, payload)?,
-        PUSH_PROMISE => {
-            if stream_zero {
-                return Err(Error::Frame("PUSH_PROMISE frame with stream ID 0"));
-            }
-            let mut rest = payload;
-            let mut pad = 0;
-            if header.has(FLAG_PADDED) {
-                let (&first, tail) = rest
-                    .split_first()
-                    .ok_or(Error::Frame("short PUSH_PROMISE"))?;
-                pad = usize::from(first);
-                rest = tail;
-            }
-            if rest.len() < 4 + pad {
-                return Err(Error::Frame("short PUSH_PROMISE"));
-            }
+        SETTINGS => {
+            frame.settings = settings(header, payload)?;
+            frame.initial_window = initial_window(payload);
         }
+        PUSH_PROMISE => check_push_promise(header, payload)?,
         PING => {
             frame.ping_data = payload.try_into().ok();
-            if frame.ping_data.is_none() || !stream_zero {
+            if frame.ping_data.is_none() {
+                return Err(Error::FrameSize("bad PING"));
+            }
+            if !stream_zero {
                 return Err(Error::Frame("bad PING"));
             }
         }
@@ -392,7 +467,7 @@ fn parse_frame(
             }
             let (ids, debug) = payload
                 .split_first_chunk::<8>()
-                .ok_or(Error::Frame("short GOAWAY"))?;
+                .ok_or(Error::FrameSize("short GOAWAY"))?;
             frame.go_away = Some(GoAway {
                 last_stream_id: u32::from_be_bytes([ids[0], ids[1], ids[2], ids[3]]) & 0x7fff_ffff,
                 err_code: u32::from_be_bytes([ids[4], ids[5], ids[6], ids[7]]),
@@ -402,7 +477,7 @@ fn parse_frame(
         WINDOW_UPDATE => {
             let raw: [u8; 4] = payload
                 .try_into()
-                .map_err(|_| Error::Frame("WINDOW_UPDATE payload is not 4 bytes"))?;
+                .map_err(|_| Error::FrameSize("WINDOW_UPDATE payload is not 4 bytes"))?;
             frame.increment = u32::from_be_bytes(raw) & 0x7fff_ffff;
             if frame.increment == 0 {
                 return Err(Error::Frame("WINDOW_UPDATE with zero increment"));
@@ -414,6 +489,26 @@ fn parse_frame(
         _ => {}
     }
     Ok((frame, fragment))
+}
+
+/// `Framer`'s checks of a `PUSH_PROMISE` frame, which tls.peet.ws records like any other.
+fn check_push_promise(header: &FrameHeader, payload: &[u8]) -> Result<(), Error> {
+    if header.stream_id == 0 {
+        return Err(Error::Frame("PUSH_PROMISE frame with stream ID 0"));
+    }
+    let mut rest = payload;
+    let mut pad = 0;
+    if header.has(FLAG_PADDED) {
+        let (&first, tail) = rest
+            .split_first()
+            .ok_or(Error::Frame("short PUSH_PROMISE"))?;
+        pad = usize::from(first);
+        rest = tail;
+    }
+    if rest.len() < 4 + pad {
+        return Err(Error::Frame("short PUSH_PROMISE"));
+    }
+    Ok(())
 }
 
 /// Where the priority and the header block fragment sit in a HEADERS payload.
@@ -498,13 +593,13 @@ fn flag_names(header: &FrameHeader) -> Vec<&'static str> {
 /// stripped, and id 9 renamed because `x/net/http2` does not know it.
 fn settings(header: &FrameHeader, payload: &[u8]) -> Result<Vec<String>, Error> {
     if header.has(FLAG_ACK) && !payload.is_empty() {
-        return Err(Error::Frame("SETTINGS ack with a payload"));
+        return Err(Error::FrameSize("SETTINGS ack with a payload"));
     }
     if header.stream_id != 0 {
         return Err(Error::Frame("SETTINGS on a stream"));
     }
     if !payload.len().is_multiple_of(6) {
-        return Err(Error::Frame("SETTINGS length is not a multiple of 6"));
+        return Err(Error::FrameSize("SETTINGS length is not a multiple of 6"));
     }
     let pairs: Vec<(u16, u32)> = payload
         .as_chunks::<6>()
@@ -521,12 +616,24 @@ fn settings(header: &FrameHeader, payload: &[u8]) -> Result<Vec<String>, Error> 
     if let Some(&(_, value)) = pairs.iter().find(|(id, _)| *id == 4)
         && value > 0x7fff_ffff
     {
-        return Err(Error::Frame("INITIAL_WINDOW_SIZE too large"));
+        return Err(Error::FlowControl("INITIAL_WINDOW_SIZE too large"));
     }
     Ok(pairs
         .into_iter()
         .map(|(id, value)| format!("{} = {value}", setting_name(id)))
         .collect())
+}
+
+/// The last `INITIAL_WINDOW_SIZE` (id 4) of a SETTINGS payload: the one that takes effect
+/// (RFC 9113 section 6.5.3 applies the settings in order).
+fn initial_window(payload: &[u8]) -> Option<u32> {
+    payload
+        .as_chunks::<6>()
+        .0
+        .iter()
+        .rev()
+        .find(|c| c[..2] == [0, 4])
+        .map(|c| u32::from_be_bytes([c[2], c[3], c[4], c[5]]))
 }
 
 fn setting_name(id: u16) -> String {

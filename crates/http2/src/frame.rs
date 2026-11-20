@@ -44,6 +44,10 @@ pub struct ParsedFrame {
     /// The opaque data of a PING frame, which the PING ACK echoes. Not part of the report.
     #[serde(skip)]
     pub ping_data: Option<[u8; 8]>,
+    /// The `INITIAL_WINDOW_SIZE` a SETTINGS frame sets, which is the flow-control window of the
+    /// response's stream (RFC 9113 section 6.9.2). Not part of the report.
+    #[serde(skip)]
+    pub initial_window: Option<u32>,
 }
 
 /// Stream priority (RFC 9113 section 5.3, deprecated but still sent by some clients).

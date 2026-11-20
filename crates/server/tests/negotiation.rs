@@ -139,12 +139,27 @@ async fn fetch_http2(
     path: &str,
     accept: Option<&str>,
 ) -> Answer {
+    let headers: Vec<(&str, &str)> = accept
+        .map(|accept| ("accept", accept))
+        .into_iter()
+        .collect();
+    fetch_http2_with(addr, roots, path, &headers).await
+}
+
+/// `GET path` over HTTP/2 with `headers`, from the `h2` crate with its default settings: flow
+/// control windows of 65,535 bytes for the stream and for the connection.
+async fn fetch_http2_with(
+    addr: SocketAddr,
+    roots: RootCertStore,
+    path: &str,
+    headers: &[(&str, &str)],
+) -> Answer {
     let tls = connect(addr, roots, b"h2").await;
     let (mut sender, connection) = h2::client::handshake(tls).await.expect("h2 handshake");
     tokio::spawn(connection);
     let mut request = http::Request::get(format!("https://localhost{path}"));
-    if let Some(accept) = accept {
-        request = request.header("accept", accept);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
     }
     let (response, _) = sender
         .send_request(request.body(()).expect("request"), true)
@@ -324,4 +339,29 @@ async fn unknown_paths_keep_the_html_404_page() {
             assert!(answer.body.contains("Page not found"));
         }
     }
+}
+
+#[tokio::test]
+async fn a_page_larger_than_the_http2_window_reaches_a_client_with_default_windows() {
+    let (addr, roots) = start().await;
+    // An 8 KB query fits one HEADERS frame. The page inlines the report, where each `&` of
+    // the query takes six bytes (`\u0026`), and together they are larger than the 65,535
+    // bytes of a default window.
+    let path = format!("/?format=html{}", "&".repeat(8000));
+    let answer = fetch_http2_with(addr, roots, &path, &[]).await;
+    assert_eq!(answer.status, 200);
+    assert!(answer.is_page());
+    assert!(
+        answer.body.len() > 65_535,
+        "the page must not fit the window: {} bytes",
+        answer.body.len()
+    );
+    assert_eq!(
+        answer.header("content-length"),
+        Some(answer.body.len().to_string().as_str())
+    );
+    assert!(
+        answer.body.trim_end().ends_with("</html>"),
+        "the whole page"
+    );
 }

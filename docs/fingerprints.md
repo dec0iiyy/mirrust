@@ -291,8 +291,10 @@ whose name starts with `user-agent` (ASCII case-insensitive), trimmed.
 After the 24-byte connection preface, frames are read until the first HEADERS or DATA frame that
 carries the `END_STREAM` flag (bit `0x1`); nothing after it is read. The server refuses more
 than 64 KiB of input (preface included), more than 256 frames before that point, and more than
-64 KiB of decoded header lines over all HEADERS frames; the connection is then closed without
-an answer. These caps are mirrust's own.
+64 KiB of decoded header lines over all HEADERS frames; the client then gets a GOAWAY frame
+with `ENHANCE_YOUR_CALM` and no report. These caps are mirrust's own. A malformed frame gets
+GOAWAY with the error code RFC 9113 gives it, where tls.peet.ws closes the connection without
+a word.
 
 Each frame is recorded with `frame_type` (`DATA`, `HEADERS`, `PRIORITY`, `RST_STREAM`,
 `SETTINGS`, `PUSH_PROMISE`, `PING`, `GOAWAY`, `WINDOW_UPDATE`, `CONTINUATION`, or
