@@ -142,7 +142,10 @@ sha256_of() {
 
 # Stops unless $tmp/$asset is the file that $tmp/SHA256SUMS lists under that name.
 verify_checksum() {
-    expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$tmp/SHA256SUMS")
+    # Lowercase, as sha256_of prints it: the check below accepts upper-case hex digits, and a
+    # SHA256SUMS written with them must not be reported as a mismatch.
+    expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$tmp/SHA256SUMS" |
+        tr 'A-F' 'a-f')
     case "$expected" in
         "") die "SHA256SUMS has no entry for $asset; nothing was installed" ;;
         *[!0-9a-fA-F]* | *"

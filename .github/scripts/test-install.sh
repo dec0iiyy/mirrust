@@ -107,6 +107,11 @@ cp "$work/release/$asset" "$work/tampered/$asset"
 printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$asset" \
     >"$work/tampered/SHA256SUMS"
 
+# A release whose SHA256SUMS spells the hash in upper-case hex digits.
+mkdir -p "$work/upper"
+cp "$work/release/$asset" "$work/upper/$asset"
+printf '%s  %s\n' "$(printf '%s' "$sum" | tr 'a-f' 'A-F')" "$asset" >"$work/upper/SHA256SUMS"
+
 # A stub uname: the system comes from UNAME_S and UNAME_M.
 cat >"$work/stubs/uname" <<'EOF'
 #!/bin/sh
@@ -121,7 +126,7 @@ chmod 755 "$work/stubs/uname"
 # Serve the directory $work/serve over HTTP on a free port of 127.0.0.1. The three release
 # directories are served under their own names.
 mkdir -p "$work/serve"
-cp -R "$work/release" "$work/tampered" "$work/serve/"
+cp -R "$work/release" "$work/tampered" "$work/upper" "$work/serve/"
 mkdir -p "$work/serve/empty"
 if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 is needed for the local release server" >&2
@@ -230,6 +235,9 @@ run_install MIRRUST_BASE_URL="$base/release" -- --prefix -dash-bin/sub
 cd "$here" || exit 2
 check "a prefix that starts with a hyphen works" test "$status" -eq 0 -a -x "$work/cwd/-dash-bin/sub/mirrust"
 
+run_install MIRRUST_BASE_URL="$base/upper" -- --prefix "$work/bin-upper"
+check "a SHA256SUMS with upper-case hex digits matches" test "$status" -eq 0 -a -x "$work/bin-upper/mirrust"
+
 # --- failures that must install nothing ---
 
 run_install MIRRUST_BASE_URL="$base/tampered" -- --prefix "$work/bin5"
@@ -275,7 +283,7 @@ done
 # (this machine has no wget; the real one takes the same two options).
 real_curl=$(command -v curl)
 mkdir -p "$work/nocurl"
-for tool in sh env mktemp rm mkdir dirname awk sha256sum shasum install cat ls id; do
+for tool in sh env mktemp rm mkdir dirname awk tr sha256sum shasum install cat ls id; do
     if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
         ln -sf "$found" "$work/nocurl/$tool"
     fi
@@ -295,7 +303,7 @@ env PATH="$work/nocurl" TMPDIR="$work/tmp" HOME="$work/home" MIRRUST_BASE_URL="$
 check "wget is used when curl is missing" sh -c "[ -x '$work/bin10/mirrust' ] && [ -e '$work/wget-used' ]"
 
 mkdir -p "$work/nodl"
-for tool in sh env mktemp rm mkdir dirname awk sha256sum shasum install cat grep; do
+for tool in sh env mktemp rm mkdir dirname awk tr sha256sum shasum install cat grep; do
     if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
         ln -sf "$found" "$work/nodl/$tool"
     fi
@@ -328,7 +336,7 @@ else
 
     # No sudo on PATH: the default prefix falls back to $HOME/.local/bin.
     mkdir -p "$work/nosudo"
-    for tool in sh env mktemp rm mkdir dirname awk sha256sum shasum install cat ls id grep curl; do
+    for tool in sh env mktemp rm mkdir dirname awk tr sha256sum shasum install cat ls id grep curl; do
         if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
             ln -sf "$found" "$work/nosudo/$tool"
         fi
