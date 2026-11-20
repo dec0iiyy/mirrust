@@ -19,7 +19,8 @@ What has not been run: the built-in ACME client against Let's Encrypt, staging o
 (see [What the tests cover](#what-the-tests-cover-and-what-they-do-not)), the current
 `mirrust.service` with `StateDirectory=` on a real server, port 443 (so
 `CAP_NET_BIND_SERVICE` was not exercised), IPv6, the firewall steps, the logrotate rules and
-the Docker image. Check those before you rely on them.
+the Docker image. Check those before you rely on them. `mirrust install` has the same
+status: see [its section](#install-with-mirrust-install) for what was tested.
 
 You need:
 
@@ -33,8 +34,127 @@ You need:
 - The `ca-certificates` package, which a normal Debian or Ubuntu server has: mirrust checks
   Let's Encrypt's own certificate against the system's root certificates.
 
-Files used below are in [`deploy/`](../deploy): `mirrust.service`, `mirrust.logrotate`
-and `Dockerfile`.
+Files used below are in [`deploy/`](../deploy): `mirrust.service`, `mirrust.logrotate`,
+`Dockerfile` and `cloud-init.yaml`. The numbered steps are the manual route;
+[`mirrust install`](#install-with-mirrust-install) does the same in one command. To set up a
+fresh VPS at first boot, see `deploy/cloud-init.yaml` (untested, with a placeholder host name).
+
+## Install with `mirrust install`
+
+This is the short path on a Debian or Ubuntu server with systemd. It does what steps 1, 3 and 4
+below do by hand, except the firewall (step 2), which it does not touch. With the DNS record in
+place:
+
+```console
+$ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh
+$ sudo mirrust install --domain mirror.example.com
+```
+
+`install.sh` is a release file of the first release after 0.1.0, and is in the repository's
+root before that. It detects the system with `uname`, downloads the binary and `SHA256SUMS`
+with curl (or wget) into a temporary directory, checks the SHA-256 before it installs
+anything, runs `gh attestation verify` as well when `gh` is installed (and only reports the
+result), and installs `/usr/local/bin/mirrust` with mode 0755. If that directory is not
+writable it uses `sudo` for the install step only, and without `sudo` it installs into
+`$HOME/.local/bin` and tells you to add that to `PATH`. Options: `--version vX.Y.Z` (default:
+the latest release) and `--prefix DIR`; `install.sh --help` lists them. It works on Linux and
+macOS, x86_64 and arm64; on Windows or anything else it prints where the releases are and exits
+with an error. The checksum file comes from the same place as the binary, so the check catches
+a damaged download; the attestation is what shows the file was built by this repository's
+release workflow.
+
+Or fetch the binary yourself (step 1) and run `sudo ./mirrust install --domain ...` from where
+it is: the command copies itself.
+
+### What it does
+
+`mirrust install` works on Linux with systemd only, as root. It refuses, with a message, on
+another operating system, when `/run/systemd/system` does not exist (systemd is not the running
+init system) and when it is not run as root. Then, in this order:
+
+1. Copies the running executable to `/usr/local/bin/mirrust` with mode 0755: it writes a
+   temporary file next to it and renames it over the target, so the file is never half
+   written. When the running executable already is that file, it does nothing.
+2. Writes `/etc/systemd/system/mirrust.service` (mode 0644, the same way). The text is
+   [`deploy/mirrust.service`](../deploy/mirrust.service), built into the binary, with its
+   `ExecStart=` block replaced by one for your flags, `LoadCredential=` lines added when you
+   give `--cert` and `--key`, and a comment on top saying who wrote the file. Everything else in
+   the unit, the sandbox included, is the template's.
+3. Runs `systemctl daemon-reload`, `systemctl enable mirrust.service` and `systemctl restart
+   mirrust.service`. The restart starts a stopped service and restarts a running one, which is
+   what makes running the command again apply new flags.
+4. Waits up to 5 seconds for `systemctl is-active mirrust.service` to say `active`, prints the
+   state, `journalctl -u mirrust -f` for the log, and the ports to open (TCP 443 and UDP 443).
+   If the service is not active by then, it says so and exits with an error; the reason is in
+   `systemctl status mirrust.service` and the journal.
+
+It makes no network connection itself; the certificate order starts when the service does.
+With `--domain` it prints the notice that this means accepting the Let's Encrypt Subscriber
+Agreement. It does not open the firewall: do that as in [step 2](#2-open-the-firewall).
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--domain NAME` | Get and renew a Let's Encrypt certificate for this name (up to 4, or `auto`). Written as `--domain NAME` and `--acme-dir ${STATE_DIRECTORY}` in the unit. |
+| `--cert PEM`, `--key PEM` | Use these files instead, as in [Alternative: certificate files](#alternative-certificate-files): absolute paths, given together, copied for the service by `LoadCredential=` at each start. They conflict with `--domain`. One of the two kinds is required. |
+| `--acme-email ADDR` | Contact address for Let's Encrypt. Needs `--domain`. |
+| `--acme-staging` | Use the staging CA. Needs `--domain`. |
+| `--log PATH` | Request log. Default `/var/log/mirrust/requests.jsonl`. It must be a file inside `/var/log/mirrust`, the only place the unit's sandbox lets the service write. |
+| `--max-connections N` | Written as `--max-connections N`; without it mirrust's default (1024) applies. |
+| `--dry-run` | Print every step and the unit text, change nothing. Works as any user on any system. |
+
+Flag combinations that make no sense are refused before anything is touched: `--cert` without
+`--key` or the other way round, `--domain` with `--cert`, `--acme-email` or `--acme-staging`
+without `--domain`, neither `--domain` nor `--cert`, a `--log` outside `/var/log/mirrust`, and a
+value with white space, quotes, `$`, `%`, `;` or a backslash, which a unit would read
+differently. The unit always has `--listen 0.0.0.0:443`; for IPv6, another port or other
+changes, use the manual unit below (the sections on the listening address and the output).
+
+### Change the flags, uninstall
+
+Run `mirrust install` again with the flags you want. It rewrites the unit and restarts the
+service; flags you leave out go back to their defaults, because the unit is written from
+scratch. Do not edit `/etc/systemd/system/mirrust.service` by hand if you mean to run the
+command again: it overwrites the file.
+
+```console
+$ sudo mirrust uninstall
+```
+
+stops and disables the service, removes the unit and `/usr/local/bin/mirrust`, and runs
+`systemctl daemon-reload`. It keeps the ACME account key and certificates in `/var/lib/mirrust`
+and the request log in `/var/log/mirrust` (with the unit's dynamic user the real directories
+are `/var/lib/private/mirrust` and `/var/log/private/mirrust`) and tells you so; delete them
+yourself if you do not need them. `--dry-run` works for it as well.
+
+### Dry run
+
+```console
+$ mirrust install --dry-run --domain mirror.example.com
+dry run: nothing is changed. A real run needs root on Linux with systemd running.
+1. copy /path/to/mirrust to /usr/local/bin/mirrust, mode 0755, replacing it atomically (skipped when it is already that file)
+2. write /etc/systemd/system/mirrust.service, mode 0644, replacing it atomically
+3. run: systemctl daemon-reload
+4. run: systemctl enable mirrust.service
+5. run: systemctl restart mirrust.service
+
+/etc/systemd/system/mirrust.service would contain:
+...
+```
+
+The dry run prints the unit text in full. Check it before the real run if you want to see
+exactly what will be written. It does not check the system (a dry run on a Mac works), and with
+`--cert` it does not check that the files exist; a real run does.
+
+### What was tested
+
+The functions that decide what is written (the unit derived from the template, the flag checks,
+the host checks, the plan) are unit-tested, and `--dry-run`, the flag errors and `--help` are
+tested by running the binary. **The live path has not been run:** the file writes under `/etc`
+and `/usr/local/bin`, the `systemctl` calls, the wait and the messages after them have never
+run on a machine with systemd, because they were written on a Mac. Run it first on a server you
+can rebuild, with `--acme-staging`, and read the journal.
 
 ## 1. Get the binary
 
@@ -353,6 +473,10 @@ Replace the binary and restart:
 $ sudo install -m 0755 mirrust /usr/local/bin/mirrust
 $ sudo systemctl restart mirrust.service
 ```
+
+With `install.sh`, run it again (add `--version vX.Y.Z` for a particular release), then restart
+the service; the unit stays as it is. `sudo ./mirrust install` with the new binary and the
+same flags replaces the binary and restarts the service in one go.
 
 ## Alternative: certificate files
 

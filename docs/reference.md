@@ -129,6 +129,10 @@ or `none`; see [docs/fingerprints.md](fingerprints.md#12-known-clients-client).
 mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
         [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
         [--cors-key KEY] [--log PATH] [--max-connections N]
+mirrust --version
+mirrust install (--domain NAME ... | --cert PEM --key PEM) [--acme-email ADDR] [--acme-staging]
+        [--log PATH] [--max-connections N] [--dry-run]
+mirrust uninstall [--dry-run]
 ```
 
 | Flag | Default | Meaning |
@@ -144,9 +148,46 @@ mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
 | `--log PATH` | no log | Append one JSON line per request, and per TLS handshake that fails after the ClientHello, to this file. See [Request log](#request-log). |
 | `--max-connections N` | `1024` | Connections that may be open at the same time, TCP and QUIC counted together; at least 1. See [Connection limit and shutdown](#connection-limit-and-shutdown). |
 | `-h`, `--help` | | Print usage and exit. |
+| `-V`, `--version` | | Print `mirrust X.Y.Z` (the version of the `server` package) and exit with status 0. Like `--help`, it wins over the other flags. |
 
 Each flag but `--acme-staging` takes its value as the next argument (`--listen 0.0.0.0:443`,
 not `--listen=...`).
+
+### `install` and `uninstall`
+
+`mirrust install` sets mirrust up as a systemd service and `mirrust uninstall` removes it. Both
+work on Linux with systemd only, as root, and refuse otherwise; `--dry-run` works as any user on
+any system. The first argument must be `install` or `uninstall`, and each takes its own flags
+(the serving flags of the server are not accepted after them, except those below).
+[deploy.md](deploy.md#install-with-mirrust-install) describes what they do, step by step.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--domain NAME` | none | Let's Encrypt certificate for this name, as for the server. Repeat for up to 4, or `auto` alone. Conflicts with `--cert`/`--key`. Accepts the Let's Encrypt Subscriber Agreement. |
+| `--cert PEM`, `--key PEM` | none | Certificate chain and key, as absolute paths, given together. The unit loads them with `LoadCredential=`, so a renewed certificate needs a restart. |
+| `--acme-email ADDR` | none | As for the server. Needs `--domain`. |
+| `--acme-staging` | off | As for the server. Takes no value. Needs `--domain`. |
+| `--log PATH` | `/var/log/mirrust/requests.jsonl` | Request log. Must be a file inside `/var/log/mirrust`. |
+| `--max-connections N` | mirrust's own default, `1024` | As for the server; at least 1. |
+| `--dry-run` | off | Print each step and, for `install`, the unit text; change nothing. Takes no value. |
+| `-h`, `--help` | | Print the usage of `install` and `uninstall`. |
+
+One of `--domain` and `--cert`/`--key` is required. Not accepted: `--listen` (the unit always
+has `0.0.0.0:443`), `--acme-dir` (the unit passes the service's state directory,
+`/var/lib/mirrust`) and `--cors-key`; use the manual unit in [deploy.md](deploy.md) for those.
+
+`install` copies the running executable to `/usr/local/bin/mirrust` (mode 0755, replaced
+atomically, skipped when it already is that file), writes `/etc/systemd/system/mirrust.service`
+from `deploy/mirrust.service` with the `ExecStart=` block replaced, runs `systemctl
+daemon-reload`, `systemctl enable mirrust.service` and `systemctl restart mirrust.service`, and
+waits up to 5 seconds for `systemctl is-active` to say `active`. Run again with other flags, it
+rewrites the unit and restarts the service. It exits with an error if the service is not
+active at the end. `uninstall` runs `systemctl disable --now mirrust.service` (a failure is
+reported and ignored), removes the unit and `/usr/local/bin/mirrust`, and runs `systemctl
+daemon-reload`; it keeps `/var/lib/mirrust` and `/var/log/mirrust`.
+
+The live path of both has not been run on a machine with systemd; see
+[deploy.md](deploy.md#what-was-tested).
 
 ### Built-in ACME
 

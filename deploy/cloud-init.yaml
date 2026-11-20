@@ -1,0 +1,41 @@
+#cloud-config
+# cloud-init.yaml: set up mirrust on a fresh Ubuntu or Debian VPS at first boot, as a systemd
+# service on TCP and UDP port 443 with a Let's Encrypt certificate that mirrust obtains and
+# renews itself.
+#
+# THIS FILE HAS NOT BEEN TESTED. Nobody has booted a server with it. Read it, try it on a
+# server you can throw away, and check /var/log/cloud-init-output.log and
+# `journalctl -u mirrust` afterwards.
+#
+# Before you use it:
+#
+#   1. Replace mirror.example.com below with your host name. It is a placeholder: left as it
+#      is, mirrust starts and keeps failing to get a certificate for a name that is not yours.
+#   2. Create a DNS A record for that name that points at the server's public address. The
+#      address is usually known only after the server exists, so create the server first, add
+#      the record, and let it resolve; mirrust retries failed orders with growing waits (5
+#      minutes, then twice as long, up to 6 hours), so it also works if the record comes late.
+#   3. Open TCP 443 and UDP 443 (UDP carries HTTP/3) in your provider's firewall or security
+#      group. This file opens nothing and changes no firewall rule.
+#   4. --domain means you accept the Let's Encrypt Subscriber Agreement,
+#      https://letsencrypt.org/repository/. To try it out first, add --acme-staging to the
+#      mirrust install line; the certificate is then not trusted by browsers.
+#
+# Needs systemd 247 or later (Debian 11, Ubuntu 22.04 or newer). The install.sh and
+# `mirrust install` used here are described in docs/deploy.md.
+
+# curl downloads install.sh; ca-certificates lets it, and mirrust, check HTTPS certificates.
+packages:
+  - ca-certificates
+  - curl
+
+# runcmd runs once, as root, near the end of the first boot.
+runcmd:
+  - |
+    set -eu
+    # Downloads the release binary for this machine, checks it against SHA256SUMS and installs
+    # /usr/local/bin/mirrust. If the download fails, the next command does not find mirrust and
+    # the script stops (set -eu).
+    curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh
+    # Writes /etc/systemd/system/mirrust.service, enables the service and starts it.
+    /usr/local/bin/mirrust install --domain mirror.example.com

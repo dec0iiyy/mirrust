@@ -108,14 +108,25 @@ default, so a pipe or a file stays clean).
 
 ## Deploy
 
-On a Linux server with a DNS `A` record for your host name pointing at it:
+On a Linux server with systemd and a DNS `A` record for your host name pointing at it:
 
 ```console
-$ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/mirrust-linux-x86_64 -o mirrust
-$ chmod +x mirrust && sudo ./mirrust --domain mirror.example.com
+$ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh
+$ sudo mirrust install --domain mirror.example.com
 ```
 
-On arm64, download `mirrust-linux-aarch64`. Or in Docker:
+The first command downloads the binary for the machine (Linux or macOS, x86_64 or arm64),
+checks it against the release's `SHA256SUMS` and installs it as `/usr/local/bin/mirrust`. The
+second copies the binary there if it is not already, writes the sandboxed systemd unit from
+[`deploy/mirrust.service`](deploy/mirrust.service) with your flags, and starts the service on
+TCP and UDP port 443. Run it again with other flags to change them, and `sudo mirrust
+uninstall` to remove it. Open TCP and UDP port 443 in the firewall and nothing else: UDP
+carries HTTP/3.
+
+mirrust gets a Let's Encrypt certificate for that name by itself (TLS-ALPN-01 on port 443, so
+no port 80) and renews it; `--domain` means you accept the Let's Encrypt Subscriber Agreement.
+Add `--acme-staging` to try it out first. Without systemd, run the binary yourself:
+`sudo mirrust --domain mirror.example.com`. Or in Docker:
 
 ```console
 $ docker run -d --name mirrust --restart unless-stopped -p 443:443/tcp -p 443:443/udp \
@@ -123,12 +134,12 @@ $ docker run -d --name mirrust --restart unless-stopped -p 443:443/tcp -p 443:44
     ghcr.io/dec0iiyy/mirrust --domain mirror.example.com --acme-dir /data/acme
 ```
 
-mirrust gets a Let's Encrypt certificate for that name by itself (TLS-ALPN-01 on port 443, so
-no port 80) and renews it; `--domain` means you accept the Let's Encrypt Subscriber Agreement.
-Open TCP and UDP port 443 and nothing else: UDP carries HTTP/3. Issuance against the real
-Let's Encrypt has not been run yet; try `--acme-staging` first. For a sandboxed systemd
-service, certificate files from certbot instead and log rotation, follow
-[docs/deploy.md](docs/deploy.md); for Docker Compose and the image, [docs/docker.md](docs/docker.md).
+To do it by hand (download without the script, your own unit, certificate files from certbot,
+log rotation), follow [docs/deploy.md](docs/deploy.md); for Docker Compose and the image,
+[docs/docker.md](docs/docker.md). `deploy/cloud-init.yaml` is an untested cloud-config for a
+fresh VPS. Not run yet: issuance against the real Let's Encrypt, and `mirrust install` on a
+machine with systemd (its dry run and its parts are tested; see
+[docs/deploy.md](docs/deploy.md#install-with-mirrust-install)).
 
 ## Documentation
 
@@ -144,7 +155,8 @@ in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container
 and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
 unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with
 Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client against Let's Encrypt (its CA
-exchange has no test), log rotation and HTTP/3 in the container. The server does not capture TCP
+exchange has no test), `mirrust install` on a systemd machine, log rotation and HTTP/3 in the
+container. The server does not capture TCP
 SYN packets yet, so the TCP checks show as not measured. Details are in
 [Reference](docs/reference.md#status).
 
