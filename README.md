@@ -172,8 +172,9 @@ unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2
 Chrome, HTTP/3. Not run yet: port 443, the built-in ACME client against Let's Encrypt (its
 exchange is tested against a fake CA in the test suite only), `mirrust install` on a systemd
 machine, log rotation and HTTP/3 in the container. On Linux the server takes each connection's
-TCP SYN from the kernel for the TCP checks of the `audit`; that code was written on macOS and
-has not run on Linux yet, and on macOS and Windows the TCP checks show as not measured.
+TCP SYN from the kernel for the TCP checks of the `audit`; a test on Ubuntu in CI reads a
+loopback SYN and the `tcp_os` check passes, but no report from a server on the internet has
+been looked at yet. On macOS and Windows the TCP checks show as not measured.
 Details are in [Reference](docs/reference.md#status).
 
 ## License

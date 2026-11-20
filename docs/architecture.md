@@ -354,13 +354,16 @@ directly.
 
 ## Known gaps
 
-- **SYN capture is for Linux and TCP only, and has not run yet.** The code was written on
-  macOS, where the socket options do not exist and no Linux target was installed to compile
-  for: the first build and run of the Linux path is CI's (`tcpip_has_the_syn_where_the_kernel_keeps_it`
-  in `crates/server/tests/api.rs`, whose Linux branch asserts the fields of a loopback SYN).
-  Until a report from a Linux server has been looked at, treat `tcpip.tcp_syn`, `p0f` and
-  the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic. What is known to be
-  missing or different from a packet capture:
+- **SYN capture is for Linux and TCP only, and is proven on a loopback connection only.** The
+  code was written on macOS, where the socket options do not exist; its first build and run
+  was CI's on Ubuntu (`tcpip_has_the_syn_where_the_kernel_keeps_it` in
+  `crates/server/tests/api.rs`), which reads the SYN of a loopback connection, checks its
+  fields and the `tcp_os` check with a Linux `User-Agent`. The kernel keeps only the SYNs
+  that arrive after the option is set, so `keep_syn` runs right after the port is bound.
+  Until a report from a Linux server on the internet has been looked at, treat `tcpip.tcp_syn`,
+  `p0f` and the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic (middleboxes
+  and NAT change TTL, MSS and options on the way). What is known to be missing or different
+  from a packet capture:
   - Only the headers are kept, so `payload_len` is 0 and p0f's payload class is `0` also for a
     TCP Fast Open SYN. `tcpip.ip` and `tcpip.tcp`, which tls.peet.ws fills from the client's
     ACK, stay `{}`.

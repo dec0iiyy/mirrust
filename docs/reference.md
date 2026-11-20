@@ -69,8 +69,9 @@ Flags, API, fields, the request log and the workspace. For the short version see
   compared.
 
 On Linux, for TCP connections, it also reports the TCP SYN: the `tcp_syn` details and a p0f v3
-signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). This has not run on
-Linux yet; see [docs/architecture.md](architecture.md#known-gaps).
+signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). A test in CI on
+Ubuntu reads a loopback SYN through this path; live traffic has not been checked yet, see
+[docs/architecture.md](architecture.md#known-gaps).
 
 The JSON layout follows tls.peet.ws, so tools written against that service can read
 mirrust's output. See [Compatibility with tls.peet.ws](#compatibility-with-tlspeetws).
