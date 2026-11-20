@@ -1,0 +1,5 @@
+# The image is built from the workspace manifest, the lock file and the crates only.
+*
+!Cargo.toml
+!Cargo.lock
+!crates

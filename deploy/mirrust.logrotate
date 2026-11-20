@@ -1,0 +1,16 @@
+# logrotate rules for the mirrust request log.
+# Install as /etc/logrotate.d/mirrust; see docs/deploy.md.
+#
+# The path is the real directory behind the /var/log/mirrust link that the systemd unit's
+# LogsDirectory= creates.
+/var/log/private/mirrust/requests.jsonl {
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    # mirrust keeps the file open in append mode and never reopens it, so the file is
+    # copied and then emptied in place instead of being renamed.
+    copytruncate
+}

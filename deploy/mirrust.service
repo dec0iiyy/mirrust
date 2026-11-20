@@ -1,0 +1,125 @@
+# mirrust.service: mirrust on TCP and UDP port 443 as an unprivileged, sandboxed service.
+#
+# Install as /etc/systemd/system/mirrust.service and replace mirror.example.com in the two
+# LoadCredential= lines with the host name of your certificate. Steps: docs/deploy.md.
+#
+# Needs systemd 247 or later (LoadCredential=, ProtectProc=): Debian 11, Ubuntu 22.04 or newer.
+# Every directive below is documented in systemd.exec(5), systemd.service(5),
+# systemd.resource-control(5) or systemd.kill(5).
+
+[Unit]
+Description=mirrust, an HTTPS server that reports the client's TLS and HTTP fingerprints
+# Start once addresses are configured, so that a --listen with a specific address can bind.
+Wants=network-online.target
+After=network-online.target
+# No start rate limit: with Restart= below, a failing service is started again every five
+# seconds for as long as it fails, instead of being given up on after a few attempts.
+StartLimitIntervalSec=0
+
+[Service]
+# "exec" reports a missing or non-executable binary as a start failure ("simple" would not).
+Type=exec
+# --listen takes one address. 0.0.0.0 is IPv4 only; see docs/deploy.md for IPv6.
+# TCP on it serves HTTP/1.1 and HTTP/2, UDP on the same port serves HTTP/3.
+# ${CREDENTIALS_DIRECTORY} is set by systemd because of LoadCredential= below.
+ExecStart=/usr/local/bin/mirrust \
+    --listen 0.0.0.0:443 \
+    --cert ${CREDENTIALS_DIRECTORY}/cert.pem \
+    --key ${CREDENTIALS_DIRECTORY}/key.pem \
+    --log /var/log/mirrust/requests.jsonl
+
+# The certificate and key. systemd reads the two files as root when the service starts and
+# gives the service read-only copies that only its own user can open, so that user needs no
+# access to /etc/letsencrypt. The copies are made at start only: restart the service after
+# the certificate is renewed.
+LoadCredential=cert.pem:/etc/letsencrypt/live/mirror.example.com/fullchain.pem
+LoadCredential=key.pem:/etc/letsencrypt/live/mirror.example.com/privkey.pem
+
+# Stop with SIGINT instead of the default SIGTERM: mirrust handles SIGINT (Ctrl-C) by
+# writing out the request log before it exits. systemd counts an exit on SIGINT as clean.
+KillSignal=SIGINT
+# After this long without an exit, systemd sends SIGKILL.
+TimeoutStopSec=20s
+
+# Restart after a crash, a non-zero exit or an out-of-memory kill; not after "systemctl stop".
+# A start that fails at once, for example because a certificate file is missing, is retried
+# too; "systemctl status mirrust" and the journal show the reason.
+Restart=on-failure
+RestartSec=5s
+
+# --- User and privileges ---
+
+# Run as a user that exists only while the service runs. systemd allocates it and names it
+# after the unit; there is no account to create or remove.
+DynamicUser=yes
+# The only capability: binding ports below 1024, which covers TCP 443 and UDP 443.
+# AmbientCapabilities= gives it to the non-root process; CapabilityBoundingSet= makes it the
+# only capability the process can ever hold.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# No privilege gain through setuid or setgid programs or file capabilities.
+NoNewPrivileges=yes
+# Do not add PrivateUsers=yes: in a private user namespace the capability above no longer
+# applies to the host's network namespace, and binding port 443 fails.
+
+# --- File system ---
+
+# The whole file system is read-only for the service, except the directories named below.
+ProtectSystem=strict
+# /home, /root and /run/user are not visible at all.
+ProtectHome=yes
+# Private /tmp and /var/tmp.
+PrivateTmp=yes
+# No physical devices in /dev; /dev/null, /dev/urandom and similar stay.
+PrivateDevices=yes
+# Creates /var/log/mirrust, owned by the service user and writable by it, for the request
+# log. With DynamicUser= the directory is really /var/log/private/mirrust, and
+# /var/log/mirrust is a symbolic link to it; /var/log/private is closed to other users.
+LogsDirectory=mirrust
+LogsDirectoryMode=0750
+# New files, the request log included, are not readable by other users.
+UMask=0027
+
+# --- Kernel interfaces ---
+
+# The service cannot write kernel tunables in /proc and /sys, load kernel modules, read the
+# kernel log, change control groups, set the clock or change the host name.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Hide other users' processes in /proc.
+ProtectProc=invisible
+# New sockets: IPv4 and IPv6 for the listeners, and AF_UNIX, which the C library may use for
+# local lookups. No netlink, packet or other families.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# No new namespaces, no realtime scheduling, no setuid or setgid files, no change of the
+# execution domain (personality).
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# No memory that is writable and executable at once; mirrust generates no code at run time.
+MemoryDenyWriteExecute=yes
+# Remove the service user's System V and POSIX IPC objects when the service stops.
+RemoveIPC=yes
+# Only the system calls of systemd's "@system-service" set, the usual set for a daemon, and
+# only for the machine's native architecture. A call outside the set fails with EPERM
+# instead of killing the process.
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+
+# --- Resources ---
+
+# Upper bound on the service's memory. At the limit the kernel kills the process and
+# Restart=on-failure starts it again. An idle mirrust uses a few megabytes; each open
+# connection adds its buffers (see "Bounded memory per client" in docs/architecture.md).
+MemoryMax=256M
+# Open files. Every TCP connection takes one descriptor for up to 15 seconds.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
