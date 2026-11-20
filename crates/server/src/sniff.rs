@@ -2,9 +2,9 @@
 //!
 //! quinn and rustls never show the ClientHello, so [`SniffingSocket`] wraps the socket quinn
 //! reads from: each long-header datagram is also fed to a [`quic::InitialAssembler`] for its
-//! connection (peer and Destination Connection ID), and the finished ClientHello waits in [`ClientHellos`] under (peer address, original
-//! Destination Connection ID) until the connection handler takes it. Datagrams reach quinn
-//! unchanged.
+//! connection (peer and Destination Connection ID), and the finished ClientHello waits in
+//! [`ClientHellos`] under (peer address, original Destination Connection ID) until the
+//! connection handler takes it. Datagrams reach quinn unchanged.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;

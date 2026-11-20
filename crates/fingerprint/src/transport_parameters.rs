@@ -37,16 +37,31 @@ fn known(id: u64) -> Option<(&'static str, Encoding)> {
         0x10 => ("retry_source_connection_id", Bytes),
         // RFC 9368.
         0x11 => ("version_information", Bytes),
+        // draft-ietf-quic-reliable-stream-reset, an empty flag.
+        0x1d => ("reset_stream_at", Bytes),
         // RFC 9221.
         0x20 => ("max_datagram_frame_size", Varint),
+        // RFC 10069 section 2.1.
+        0x3e => ("initial_max_path_id", Varint),
+        // The provisional entries of the IANA "QUIC Transport Parameters" registry that a client
+        // may send: Quantum Readiness test, SCONE (draft-ietf-scone-protocol).
+        0x173e => ("discard", Bytes),
+        0x219e => ("scone_supported", Bytes),
         // RFC 9287.
         0x2ab2 => ("grease_quic_bit", Bytes),
         // Google QUIC (quiche).
+        0x26ab => ("google_handshake_message", Bytes),
         0x3127 => ("initial_rtt", Varint),
         0x3128 => ("google_connection_options", Bytes),
+        0x3129 => ("user_agent", Bytes),
         0x4752 => ("google_version", Bytes),
-        // draft-ietf-quic-ack-frequency; the id changed between drafts.
-        0xde1a | 0xff02_de1a | 0xff04_de1b => ("min_ack_delay", Varint),
+        // draft-ietf-quic-version-negotiation before RFC 9368.
+        0x00ff_73db => ("version_information_draft", Bytes),
+        // The id of min_ack_delay changed with the drafts: 0xde1a in
+        // draft-iyengar-quic-delayed-ack-01, 0xff02de1a in delayed-ack-02 and
+        // draft-ietf-quic-ack-frequency-00, 0xff03de1a in ack-frequency-01 to -03, 0xff04de1a in
+        // -04 to -06, 0xff04de1b from -07 on (the one IANA registers).
+        0xde1a | 0xff02_de1a | 0xff03_de1a | 0xff04_de1a | 0xff04_de1b => ("min_ack_delay", Varint),
         _ => return None,
     })
 }
@@ -77,7 +92,7 @@ pub(crate) fn transport_parameters(data: &[u8]) -> Vec<Value> {
     let mut rest = data;
     while let Some((id, value, next)) = parameter(rest) {
         rest = next;
-        // Named ids first: 0xff02de1a, the `min_ack_delay` of ack-frequency drafts 01 to 03,
+        // Named ids first: 0xff02de1a, the `min_ack_delay` of the first ack-frequency draft,
         // happens to be of the reserved form.
         let (name, encoding) = if let Some((name, encoding)) = known(id) {
             (name.to_owned(), encoding)
@@ -153,7 +168,14 @@ mod tests {
     #[test]
     fn a_named_parameter_with_a_reserved_id_keeps_its_name() {
         let named_and_reserved: Vec<u64> = (0..=0x4752)
-            .chain([0xde1a, 0xff02_de1a, 0xff04_de1b])
+            .chain([
+                0xde1a,
+                0xff02_de1a,
+                0xff03_de1a,
+                0xff04_de1a,
+                0xff04_de1b,
+                0x00ff_73db,
+            ])
             .filter(|&id| is_reserved(id) && known(id).is_some())
             .collect();
         assert_eq!(named_and_reserved, [0xff02_de1a]);
@@ -162,6 +184,32 @@ mod tests {
         assert_eq!(
             Value::from(transport_parameters(&data)),
             json!([{ "id": 0xff02_de1a_u32, "name": "min_ack_delay", "value": 1000 }])
+        );
+    }
+
+    #[test]
+    fn names_follow_the_registry_and_the_ack_frequency_drafts() {
+        let data = [
+            &[0x1d, 0x00][..],                                    // reset_stream_at, a flag
+            &[0x3e, 0x01, 0x04],                                  // initial_max_path_id = 4
+            &[0x80, 0x00, 0xde, 0x1a, 0x01, 0x05],                // 0xde1a: delayed-ack-01
+            &[0xc0, 0, 0, 0, 0xff, 0x03, 0xde, 0x1a, 0x01, 0x06], // ack-frequency-01 to -03
+            &[0xc0, 0, 0, 0, 0xff, 0x04, 0xde, 0x1a, 0x01, 0x07], // ack-frequency-04 to -06
+        ]
+        .concat();
+        let names: Vec<(Value, Value)> = transport_parameters(&data)
+            .into_iter()
+            .map(|parameter| (parameter["name"].clone(), parameter["value"].clone()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                (json!("reset_stream_at"), json!("")),
+                (json!("initial_max_path_id"), json!(4)),
+                (json!("min_ack_delay"), json!(5)),
+                (json!("min_ack_delay"), json!(6)),
+                (json!("min_ack_delay"), json!(7)),
+            ]
         );
     }
 }
