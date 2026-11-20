@@ -9,7 +9,7 @@ use fingerprint::{ClientHello, Ja3, Ja4, Ja4Peet, PeetPrint, Transport};
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use serde_json::Value;
-use server::{Config, self_signed_cert, serve, tls_config};
+use server::{Config, keep_syn, self_signed_cert, serve, tls_config};
 use tokio::runtime::Runtime;
 
 /// Starts the server; the runtime must outlive the requests.
@@ -24,6 +24,8 @@ fn start() -> (Runtime, SocketAddr, RootCertStore) {
         .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
         .expect("bind an ephemeral port");
     let addr = listener.local_addr().expect("local addr");
+    // Before anything connects: the kernel keeps only the SYNs that arrive after this.
+    keep_syn(&listener);
     let config = Config {
         h3_port: Some(addr.port()),
         ..Config::default()

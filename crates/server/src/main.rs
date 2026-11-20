@@ -342,6 +342,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(args.listen)
         .await
         .map_err(|error| bind_error("tcp", args.listen, error))?;
+    server::keep_syn(&listener);
     let writer = match &args.log {
         Some(path) => {
             let (log, writer) = RequestLog::open(path)

@@ -159,6 +159,16 @@ pub fn self_signed_cert() -> io::Result<(Vec<CertificateDer<'static>>, PrivateKe
     Ok((vec![certified.cert.der().clone()], key.into()))
 }
 
+/// Asks the kernel to keep the TCP SYN of each connection `listener` accepts from now on, so
+/// that the report can show it (Linux with `TCP_SAVE_SYN`; elsewhere this does nothing).
+///
+/// The kernel keeps only the SYNs that arrive after this call, so call it right after binding,
+/// before anything can connect. [`serve`] calls it too, but a client that connects before
+/// `serve` first runs would be missed.
+pub fn keep_syn(listener: &TcpListener) {
+    syn::keep(listener);
+}
+
 /// Accepts connections forever, handling each on its own task.
 ///
 /// A connection that arrives while [`Config::connections`] has no free slot is closed at once.
