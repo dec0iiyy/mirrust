@@ -122,7 +122,10 @@ impl FailureLog {
         Self::with_sink(REPORT_INTERVAL, |line| eprintln!("{line}"))
     }
 
-    fn with_sink(interval: Duration, sink: impl Fn(&str) + Send + Sync + 'static) -> Self {
+    pub(crate) fn with_sink(
+        interval: Duration,
+        sink: impl Fn(&str) + Send + Sync + 'static,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 interval,
