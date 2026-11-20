@@ -38,6 +38,22 @@ The workspace lints are strict: `unsafe` code is forbidden, public items need do
 and Clippy's `pedantic` group and `unwrap_used` are on. `-D warnings` turns every lint warning
 into an error.
 
+## Dependencies
+
+After a change to a dependency or to `Cargo.lock`, check the advisories, the licences and the
+duplicate versions. Neither tool is installed by the repository, and CI does not run them
+(`cargo install --locked cargo-deny cargo-audit`):
+
+```console
+$ cargo deny check      # reads deny.toml: advisories, licences, bans, sources
+$ cargo audit           # the RustSec advisories for Cargo.lock
+```
+
+`cargo deny check` fetches the RustSec database and fails on a known advisory, a yanked
+or unmaintained crate, a licence outside the permissive list in `deny.toml`, and a git or
+non-crates.io source; two versions of one crate are only a warning. Regenerate
+`THIRD-PARTY-LICENSES.md` too when `Cargo.lock` changes (see [docs/releasing.md](docs/releasing.md)).
+
 ## Golden snapshots
 
 The fingerprint, HTTP/2 and SYN code is tested against the files in `corpus/`. Each input file
