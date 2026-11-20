@@ -89,3 +89,25 @@ jobs:
           rustup default 1.88
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo check --workspace --locked
+
+  install-script:
+    # install.sh against a fake release served from a local directory: no network, and not
+    # the published release (that test is `test-install.sh --online`, run by hand).
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The test script runs shellcheck too when it is installed; here it is required on Ubuntu,
+      # where the runner image has it, so that a missing tool cannot skip the check.
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck -s sh install.sh .github/scripts/test-install.sh
+      - name: Test install.sh
+        run: .github/scripts/test-install.sh
