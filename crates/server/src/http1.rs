@@ -25,6 +25,7 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> io::Result<()> {
     let request = read_request(&mut stream).await?;
     let mut report = parse(&request);
+    report.http1_cut = !request.windows(4).any(|window| window == b"\r\n\r\n");
     report.ip = peer.to_string();
     report.tls = Some(tls);
 

@@ -106,6 +106,9 @@ pub(crate) struct Report {
     pub(crate) tls: Option<TlsDetails>,
     /// HTTP/1 header lines in order; `None` leaves `http1` out of the JSON.
     pub(crate) http1_headers: Option<Vec<String>>,
+    /// The HTTP/1 request head did not fit the read buffer or ended early, so `http1_headers` may
+    /// lack headers the client sent. The audit then does not judge the headers.
+    pub(crate) http1_cut: bool,
     /// HTTP/2 frames and Akamai fingerprint; `None` leaves `http2` out of the JSON.
     pub(crate) http2: Option<http2::Http2Details>,
     /// What the QUIC Initial packets show; `None` leaves `quic` out of the JSON.
@@ -183,11 +186,15 @@ impl Report {
             .http2
             .as_ref()
             .map(|details| details.akamai_fingerprint.as_str());
-        input.headers = self.http1_headers.as_deref().or_else(|| {
-            let frames = &self.http2.as_ref()?.sent_frames;
-            let request = frames.iter().rev().find(|f| f.frame_type == "HEADERS")?;
-            Some(request.headers.as_slice())
-        });
+        input.headers = if self.http1_cut {
+            None
+        } else {
+            self.http1_headers.as_deref().or_else(|| {
+                let frames = &self.http2.as_ref()?.sent_frames;
+                let request = frames.iter().rev().find(|f| f.frame_type == "HEADERS")?;
+                Some(request.headers.as_slice())
+            })
+        };
         Some(audit::audit(&input))
     }
 
@@ -349,5 +356,35 @@ mod tests {
         let report = Report::default();
         assert_eq!(report.clean_json()["audit"], Value::Null);
         assert_eq!(report.to_json()["audit"], Value::Null);
+    }
+
+    /// The checks the audit reports for `report`, by id.
+    fn check_ids(report: &Report) -> Vec<String> {
+        let audit = report.audit_json();
+        audit["checks"]
+            .as_array()
+            .map(|checks| {
+                checks
+                    .iter()
+                    .filter_map(|check| check["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_cut_http1_head_is_not_judged_for_missing_headers() {
+        let chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like \
+                      Gecko) Chrome/160.0.0.0 Safari/537.36";
+        let mut report = Report {
+            user_agent: chrome.into(),
+            tls: Some(TlsDetails::default()),
+            http1_headers: Some(vec![format!("User-Agent: {chrome}")]),
+            ..Report::default()
+        };
+        assert!(check_ids(&report).contains(&"headers".to_owned()));
+
+        report.http1_cut = true;
+        assert!(!check_ids(&report).contains(&"headers".to_owned()));
     }
 }

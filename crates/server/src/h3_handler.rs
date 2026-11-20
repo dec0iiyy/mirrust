@@ -22,7 +22,7 @@ use rustls::ServerConfig;
 use crate::h3_tap::{self, TapConnection, UniStreams};
 use crate::quic_details::QuicDetails;
 use crate::report::{Report, TlsDetails};
-use crate::routes::{RESPONSE_HEADERS, route, wants_cors};
+use crate::routes::{RESPONSE_HEADERS, date, route, wants_cors};
 use crate::sniff::{ClientHellos, SniffingSocket};
 use crate::{CONNECTION_TIMEOUT, Config};
 
@@ -243,7 +243,8 @@ async fn respond(
             format!("{content_type}; charset=utf-8"),
         )
         .header(header::CONTENT_LENGTH, body.len())
-        .header(header::SERVER, "mirrust");
+        .header(header::SERVER, "mirrust")
+        .header(header::DATE, date());
     for (name, value) in RESPONSE_HEADERS {
         response = response.header(name, value);
     }
