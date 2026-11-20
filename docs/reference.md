@@ -129,7 +129,7 @@ from Let's Encrypt, staging and then production, on an Ubuntu 24.04 server, inst
 `mirrust install` and the current `deploy/mirrust.service`. Not run yet: IPv6, the logrotate
 rules, the Docker image's HTTP/3, and renewal, which happens about 30 days before expiry.
 
-The dataset behind the `client` field has 31 entries, so a real client often gets `ciphers`
+The dataset behind the `client` field has 52 entries, so a real client often gets `ciphers`
 or `none`; see [docs/fingerprints.md](fingerprints.md#12-known-clients-client).
 
 ## Command line
@@ -601,7 +601,7 @@ The fingerprint, HTTP/2 and SYN code is tested against golden snapshots in `corp
 
 | Input | Snapshot | Contents |
 | --- | --- | --- |
-| `hellos.jsonl` | `expected.jsonl` | 121 ClientHellos from common browser and library profiles (Chrome, Firefox, Safari, iOS, Edge, OkHttp, 360, QQ, randomized), with and without SNI. |
+| `hellos.jsonl` | `expected.jsonl` | 127 ClientHellos from common browser and library profiles (Chrome, Firefox, Safari, iOS, Edge, OkHttp, 360, QQ, randomized), with and without SNI. |
 | `malformed.jsonl` | `malformed_expected.jsonl` | 700 inputs: 697 truncated and corrupted ClientHellos derived from five of the above (Chrome 120 and 133, Firefox 120, iOS 12.1, Safari 16.0) and 3 hand-built ones. |
 | `h2.jsonl` | `h2_expected.jsonl` | 34 HTTP/2 client byte streams: curl, Go `net/http` and Node `http2` sessions, and hand-built frame sequences. |
 | `syn.jsonl` | `syn_expected.jsonl` | 262 IPv4 and IPv6 SYN packets: OS option sets, p0f quirks, malformed headers and options, truncations. |
@@ -615,8 +615,8 @@ $ git diff corpus/
 ```
 
 `corpus/clients.jsonl` is not a snapshot but the known-client dataset behind the `client` field:
-31 entries, 20 from the browser profiles of `hellos.jsonl` and 11 captured from clients through
-the server. Tests check that it parses, that its JA4s are unique and are the hashes of their
+52 entries: 21 from the browser profiles of `hellos.jsonl`, 7 from the signatures of
+curl-impersonate and 24 captured from clients through the server. Tests check that it parses, that its JA4s are unique and are the hashes of their
 `ja4_r`, and that every profile of `hellos.jsonl` with SNI is in it.
 
 Other tests cover the JA4 worked example from the FoxIO specification, the RFC 9001 Appendix A

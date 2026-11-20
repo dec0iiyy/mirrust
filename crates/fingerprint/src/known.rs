@@ -400,7 +400,7 @@ mod tests {
     use crate::ja4::hash;
 
     /// Families [`Client::agrees_with`] knows; `rustls` is a library and agrees with none.
-    const FAMILIES: [&str; 10] = [
+    const FAMILIES: [&str; 13] = [
         "Chrome",
         "360 Browser",
         "Firefox",
@@ -411,6 +411,9 @@ mod tests {
         "Node.js",
         "okhttp",
         "rustls",
+        "Ruby",
+        "Java",
+        "Secure Transport",
     ];
 
     const CHROME_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \

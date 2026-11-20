@@ -213,7 +213,7 @@ tls.peet.ws's and follow three rules, checked against the IANA registries on 202
   `SecP384r1MLKEM1024 (4589)`) and 18 signature schemes (`mldsa44`, `mldsa65`, `mldsa87`,
   the twelve `slhdsa_*` and three `bign-*`).
 
-No JSON key changed, and none of the 121 ClientHellos in `corpus/hellos.jsonl` or the 700 in
+No JSON key changed, and none of the 127 ClientHellos in `corpus/hellos.jsonl` or the 700 in
 `corpus/malformed.jsonl` has one of these code points, so no snapshot changed either.
 
 `extensions`: one object per extension in the client's order, `null` when there are none. Every
@@ -670,9 +670,18 @@ Sources:
   Profiles with one JA4 are merged into one line whose range spans them; the versions between
   the listed profiles were not observed. These are uTLS's reproductions of the browsers, not
   captures of them, and have no `akamai`.
+- Signatures of the test suite of curl-impersonate (MIT, lexiforest/curl-impersonate), which
+  were captured from real browsers: Chrome 150, Firefox 133 and 135 to 144, Safari 18 and 26 on
+  macOS and iOS. The ClientHello was rebuilt from the signature (ciphers, extension order and
+  types, versions, ALPN, signature algorithms, groups) and fed to the code of this repository for
+  the hashes. Only signatures that were captured are used, not the ones curl-impersonate derives
+  from profile options.
 - Clients captured through mirrust itself with a server name, with their exact versions in
-  `source`: curl, Python (`urllib`, httpx), Go `net/http`, Node.js (`https`, `http2`), rustls
-  (`crates/server/examples/rustls_get.rs`) and headless Chrome.
+  `source`: curl, Python (`urllib`, httpx, requests), Go `net/http`, Node.js (`https`, `http2`,
+  `fetch`), Ruby `Net::HTTP`, Java (`HttpClient`, `HttpsURLConnection`), `reqwest` and `ureq`
+  with rustls or with the system TLS (Secure Transport on macOS), rustls
+  (`crates/server/examples/rustls_get.rs`) and headless Chrome. Clients whose JA4 equals one
+  already in the file (aiohttp, axios, got) have no line of their own.
 
 To add a client, request `/api/all` with it, copy `tls.ja4`, `tls.ja4_r` and
 `http2.akamai_fingerprint` into a new line, and run `cargo test -p fingerprint`: the tests check
@@ -693,12 +702,13 @@ row in `Client::agrees_with`.
 - Versions are not compared. A Chrome 133 `User-Agent` with the JA4 of Chrome 100 is
   `consistent: true`.
 - The version ranges are what was looked at, not when a fingerprint began or ended. For the
-  20 browser entries they are the names of uTLS profiles, and a range spans the profiles that
-  share a JA4; nobody captured the versions between them. Three consequences:
-  - **Chrome 134 to 159 are not in the dataset.** The newest entries are the profile of 133
-    and a capture of Canary 160, which differ by one extension (51764, `trust_anchors`). A
-    real Chrome of a version between is an `exact` match with whichever of the two it sends
-    like, and the report then names that version, not the browser's. If it sends something
+  browser entries they are the names of uTLS profiles or curl-impersonate signatures, and a
+  range spans the ones that share a JA4; nobody captured the versions between them. Three consequences:
+  - **Chrome 134 to 149 and 151 to 154 are not in the dataset.** The entries around the gap
+    are the profile of 133, a signature of 150 and one entry for the profile of 155 and a
+    capture of Canary 160, which share a JA4. The profile of 133 and Canary 160 differ by one
+    extension (51764, `trust_anchors`). A real Chrome of a version between is an `exact` match
+    with whichever of the two it sends like, and the report then names that version, not the browser's. If it sends something
     else it is a `ciphers` match or `none`, which costs 5 or 10 points in the `audit`
     (`tls_known`) and leaves the verdict `consistent`; the `tls_traits` check then judges it
     by the extensions Chromium always sends.

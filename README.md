@@ -37,7 +37,7 @@ missing browser headers behind it.
 | **A verdict, not just hashes** | An `audit` score from 0 to 100 compares the `User-Agent`, the TLS stack, the HTTP/2 settings and the request headers, and says which layer gives the client away. |
 | **Every layer on one port** | TLS over TCP and QUIC, HTTP/1.1, HTTP/2 and HTTP/3, all served from one address. |
 | **The fingerprints people use** | JA4 per the FoxIO specification (with `_o`, `_r` and `_ro`), JA3, PeetPrint and the Akamai HTTP/2 string, in the JSON layout of tls.peet.ws, plus an HTTP/3 fingerprint of its own. |
-| **Knows real clients** | A dataset of 31 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, rustls and okhttp. |
+| **Knows real clients** | A dataset of 52 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, Java, Ruby, rustls and okhttp. |
 | **Small and self-contained** | One binary of about 5 MB that idles at about 6 MB of memory. No database, no runtime to install. |
 | **Made for the open internet** | A connection limit, bounded memory per client, property-tested parsers, no `unsafe` code, and an optional JSON Lines request log. |
 | **Keeps nothing about you** | The installed service writes no request log and nothing per request to the journal. A visitor's IP address lives in memory while the page is built. |

@@ -25,7 +25,7 @@ Two limits of these numbers:
 | Python `httpx` 0.28.1 | HTTP/1.1 | `t12i3805h1_10ed599f3404_67a080e8974e` | 100, consistent | Python 3.9.6 (urllib) |
 | Node.js 26.13.1 `fetch` | HTTP/2 | `t13i5211h1_b262b3658495_e44827223d20` | 100, consistent | Node.js 26.13.1 |
 | Go 1.27.4 `net/http` | HTTP/2 | `t13i1311h2_f57a46bbacb6_f50d94e863eb` | 100, consistent | Go net/http 1.27.4 |
-| Chrome Canary 160 (headless) | HTTP/2 | `t13i1516h2_8daaf6152771_cb7bf5808d99` | 100, consistent | Chrome 160 (Canary) |
+| Chrome Canary 160 (headless) | HTTP/2 | `t13i1516h2_8daaf6152771_cb7bf5808d99` | 100, consistent | Chrome 155-160 (Canary) |
 | Rust `reqwest` 0.12.28 (rustls), no `User-Agent` | HTTP/2 | `t13i1010h2_61a7ad8aa9b6_3a8073edd8ef` | 85, suspicious | rustls 0.23.46 |
 
 Things worth knowing:

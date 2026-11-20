@@ -11,3 +11,8 @@ mirrust is licensed under the GNU General Public License version 3 only
 This program is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The known-client dataset (corpus/) holds ClientHellos and fingerprints taken from the
+BSD-3-Clause licensed uTLS (https://github.com/refraction-networking/utls) and from the
+MIT licensed test signatures of curl-impersonate
+(https://github.com/lexiforest/curl-impersonate, copyright (c) curl_cffi developers).

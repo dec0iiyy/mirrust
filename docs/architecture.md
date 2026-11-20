@@ -468,7 +468,7 @@ directly.
 - **The stdout line per request is a blocking write** made on the connection's task. If
   whatever reads stdout stops reading and the pipe fills, serving slows down; discard stdout
   or keep it flowing.
-- **The known-client dataset is small** (31 entries: 20 from uTLS browser profiles and 11 captured), so
+- **The known-client dataset is small** (52 entries: 21 from uTLS browser profiles, 7 from curl-impersonate signatures and 24 captured), so
   many real clients get a `ciphers` or `none` match. The HTTP/2 fingerprint stored with an
   entry is used by the `audit` but not by the matching.
 - **`fpdiff`** compares only the Akamai string for HTTP/2, not `sent_frames`; JA4 is recomputed
