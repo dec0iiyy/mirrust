@@ -4,6 +4,11 @@ Flags, API, fields, the request log and the workspace. For the short version see
 
 ## What you see
 
+- **The text report at `/`.** `curl -k https://localhost:8443` prints the score with a bar,
+  every check with what it found (problems first), the fingerprints, and the facts about the
+  ClientHello a person scans: TLS version, cipher and extension counts, ALPN, SNI, post-quantum
+  key exchange, Encrypted ClientHello, legacy cipher suites and GREASE. It is ASCII, at most 78
+  columns wide and has no raw hex; see [Text report](#text-report).
 - **The page at `/`.** Open the server in a browser. The page shows the `audit` score and
   verdict, every check behind them with what it found, the fingerprints, the cipher suites and
   extensions in the order sent, the HTTP/2 frames or HTTP/1 headers, for HTTP/3 the QUIC and
@@ -174,7 +179,8 @@ open at that moment are cut off, not finished.
 
 | Route | Response |
 | --- | --- |
-| `/` | HTML page that renders the report of the current connection (built into the binary). |
+| `/` | The text report or the HTML page, by `Accept` and `?format=`; see [Text report](#text-report). |
+| `/text` | The text report, whatever the request asks for. |
 | `/api/all` | The full report as indented JSON. |
 | `/api/tls` | The report with only the `tls` object filled in: `ip`, `http_version` and `method` are empty strings, and there is no `user_agent`, `client` or `audit`. |
 | `/api/clean` | The fingerprints, the `client` object and the `audit` score and verdict. |
@@ -194,6 +200,7 @@ status and for `OPTIONS` answers:
 | `Cache-Control` | `no-store` | A report describes the connection it was sent on; a stored copy would describe another one. |
 | `X-Content-Type-Options` | `nosniff` | The body is to be read as its `Content-Type` says. |
 | `Referrer-Policy` | `no-referrer` | Links on the page do not tell other sites where the visitor came from. |
+| `Vary` | `Accept` | `/` answers with the text report or the page by `Accept`, so a cache must not serve one for the other. It is on every response, because HTTP/2 sends these headers from one fixed list. |
 
 HTTP/1.1 and HTTP/2 connections are closed after one response. An HTTP/3 connection answers up
 to 100 requests, one after another; then the server sends GOAWAY.
@@ -287,6 +294,101 @@ How every value is computed, including edge cases, is specified in
 `audit` reduced to `{"score": ..., "verdict": ...}`. `akamai` and `akamai_hash` are `-` when
 the request did not use HTTP/2. For an HTTP/3 request whose ClientHello was not captured, the
 fingerprints are empty strings, `client.match` is `none` and `audit` is `null`.
+
+### Text report
+
+`/` chooses between the text report (`Content-Type: text/plain; charset=utf-8`) and the HTML page
+(`text/html; charset=utf-8`) in this order:
+
+1. `?format=html` gives the page and `?format=text` the text report; the value is compared
+   without regard to ASCII case. The first `format=` in the query counts, and any other value is
+   ignored.
+2. Otherwise the page goes to a request whose `Accept` header contains `text/html` (any case; the
+   values of several `Accept` lines are joined), which is what every browser sends.
+3. Every other request, including one with no `Accept` header or with `Accept: */*` (curl, wget,
+   HTTPie, scripts), gets the text report.
+
+`/text` is the text report for every request. `/api/*` is JSON whatever the `Accept` header
+says, and an unknown path gets the HTML 404 page. `?color=1` (on `/` or `/text`) wraps the text in
+ANSI colour: bold titles and score, green for `ok` and a consistent verdict, yellow for `WARN`
+and suspicious, red for `FAIL` and inconsistent, dim for rules, `skip` and hints. Colour is off by
+default; with it, `| less -R` shows it. The `Accept` header is read the same way on HTTP/1.1,
+HTTP/2 and HTTP/3.
+
+This is what `curl -k https://localhost:8443` printed from a release binary (HTTP/2; the port in
+the first line is the client's):
+
+```
+mirrust  (h2, TLS 1.3, 127.0.0.1:54902)
+
+AUDIT  100/100  [####################]  consistent
+  Looks like curl 8.7.1 (exact match). The User-Agent claims curl.
+
+  3 checks passed, 1 not measured
+  [ ok ] TLS fingerprint against known clients
+         Identical to curl 8.7.1
+  [ ok ] User-Agent against the TLS stack
+         The User-Agent says curl, the TLS stack is curl
+  [ ok ] HTTP/2 fingerprint against the client
+         Settings, window and header order are those of curl
+  [skip] TCP stack against the User-Agent
+         Not measured: this server did not capture the TCP SYN. Behind a proxy
+         or VPN the TCP stack is the exit's, the User-Agent the device's, and
+         the two disagree here
+
+FINGERPRINTS -----------------------------------------------------------------
+  ja4        t13d4907h2_0d8feac7bc37_7395dae3b2f3
+  ja4_o      t13d4907h2_2677ac475d6b_c6f9150fbe3b
+  ja3        375c6162a492dfbf2795909110ce8424
+  peetprint  0d6ceceb9e71ec096d2022ad0651e2f2
+  akamai     64a832f547be33249bf4d33e8a46c5dc
+             3:100;4:10485760;2:0|1048510465|0|m,s,a,p
+
+TLS --------------------------------------------------------------------------
+  Highest TLS version offered  TLS 1.3 (offers TLS 1.3, TLS 1.2, TLS 1.1, TLS
+                               1.0)
+  Cipher suites                49
+  Extensions                   7
+  ALPN                         h2, http/1.1
+  Server name (SNI)            localhost
+  Post-quantum key exchange    No (groups: X25519, P-256, P-384, P-521)
+  Encrypted ClientHello        Not sent
+  Legacy cipher suites         32 of 49 (8 broken)
+  GREASE                       No
+
+colour: ?color=1  JSON: /api/all  short JSON: /api/clean  page: /?format=html
+```
+
+The same request over `--http1.1` starts with `mirrust  (HTTP/1.1, TLS 1.3, ...)`, has no `akamai`
+row and no HTTP/2 check. Over HTTP/3 the `akamai` row is an `http3` row with the hash and string
+of the HTTP/3 fingerprint. With a Chrome `User-Agent` on the same curl, the checks that fail come
+first:
+
+```
+mirrust  (h2, TLS 1.3, 127.0.0.1:54906)
+
+AUDIT  30/100  [######              ]  inconsistent
+  Looks like curl 8.7.1 (exact match). The User-Agent claims Chrome.
+
+  2 failed, 2 passed, 1 not measured
+  [FAIL] User-Agent against the TLS stack
+         The User-Agent says Chrome, but the TLS stack is curl 8.7.1
+  [FAIL] Request headers of the claimed browser
+         Chrome sends these with every request; missing here: sec-ch-ua,
+         sec-fetch-*, accept-language, accept-encoding
+  [ ok ] TLS fingerprint against known clients
+         Identical to curl 8.7.1
+...
+```
+
+Layout rules: each check is a badge (`[ ok ]`, `[WARN]`, `[FAIL]`, `[skip]`), its title and
+its detail indented under the title; long text wraps at the 78th column with a hanging indent
+and is never cut, except a single word longer than a line. The bar has 20 cells. Everything the
+client chose (the SNI, the ALPN protocols, the peer address) is cut at 200 characters, and every
+control or non-ASCII character in the text is written as an escape such as `\n` or `\u{1b}`,
+so a client cannot send escape sequences to its own terminal or pipe. The JA3 text and raw hex
+(key shares, the ClientHello) are not printed; `/api/all` has them. Without a captured
+ClientHello the report is the title line and a note saying so.
 
 ## Request log
 

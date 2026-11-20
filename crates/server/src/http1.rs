@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::Config;
 use crate::report::{Report, TlsDetails};
-use crate::routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, route, wants_cors};
+use crate::routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, header_value, route, wants_cors};
 
 /// The request is read into a 1024-byte buffer once and that buffer is parsed whole,
 /// zero padding included.
@@ -122,11 +122,14 @@ fn parse(request: &[u8]) -> Report {
         .trim()
         .to_owned();
 
+    let accept = header_value(headers.iter().map(String::as_str), "accept");
+
     Report {
         http_version: (*version).to_owned(),
         path: (*path).to_owned(),
         method: (*method).to_owned(),
         user_agent,
+        accept,
         http1_headers: Some(headers),
         ..Report::default()
     }
@@ -161,6 +164,7 @@ mod tests {
         assert_eq!(report.path, "/api/all");
         assert_eq!(report.http_version, "HTTP/1.1");
         assert_eq!(report.user_agent, "curl/8");
+        assert_eq!(report.accept, "*/*");
         assert_eq!(
             report.http1_headers.expect("parsed"),
             ["Host: x", "user-agent:  curl/8 ", "Accept: */*"]

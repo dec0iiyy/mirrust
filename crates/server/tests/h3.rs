@@ -53,6 +53,17 @@ async fn connect(addr: SocketAddr, roots: RootCertStore) -> (quinn::Endpoint, qu
 
 /// Sends `GET path` over HTTP/3 and returns the response body.
 async fn get(addr: SocketAddr, roots: RootCertStore, path: &str) -> Vec<u8> {
+    get_accepting(addr, roots, path, None).await.1
+}
+
+/// Sends `GET path` over HTTP/3, with an `Accept` header when `accept` is given; returns the
+/// response headers and body.
+async fn get_accepting(
+    addr: SocketAddr,
+    roots: RootCertStore,
+    path: &str,
+    accept: Option<&str>,
+) -> (http::HeaderMap, Vec<u8>) {
     let (_endpoint, connection) = connect(addr, roots).await;
 
     let (mut driver, mut sender) = h3::client::new(h3_quinn::Connection::new(connection))
@@ -60,24 +71,29 @@ async fn get(addr: SocketAddr, roots: RootCertStore, path: &str) -> Vec<u8> {
         .expect("HTTP/3 setup");
     tokio::spawn(async move { future::poll_fn(|cx| driver.poll_close(cx)).await });
 
-    let request = http::Request::get(format!("https://localhost:{}{path}", addr.port()))
-        .header("user-agent", "h3-test/1")
-        .body(())
-        .expect("request");
-    let mut stream = sender.send_request(request).await.expect("send request");
+    let mut request = http::Request::get(format!("https://localhost:{}{path}", addr.port()))
+        .header("user-agent", "h3-test/1");
+    if let Some(accept) = accept {
+        request = request.header("accept", accept);
+    }
+    let mut stream = sender
+        .send_request(request.body(()).expect("request"))
+        .await
+        .expect("send request");
     stream.finish().await.expect("finish request");
     let response = stream.recv_response().await.expect("response head");
     assert_eq!(response.status(), 200);
-    let headers = response.headers();
+    let headers = response.headers().clone();
     assert_eq!(headers["cache-control"], "no-store");
     assert_eq!(headers["x-content-type-options"], "nosniff");
     assert_eq!(headers["referrer-policy"], "no-referrer");
+    assert_eq!(headers["vary"], "Accept");
 
     let mut body = Vec::new();
     while let Some(mut chunk) = stream.recv_data().await.expect("response body") {
         body.extend_from_slice(&chunk.copy_to_bytes(chunk.remaining()));
     }
-    body
+    (headers, body)
 }
 
 #[tokio::test]
@@ -324,4 +340,57 @@ async fn h3_answers_100_requests_per_connection_then_sends_goaway() {
     let body = get(addr, roots, "/api/all").await;
     let json: Value = serde_json::from_slice(&body).expect("JSON body");
     assert_eq!(json["http_version"], "h3");
+}
+
+#[tokio::test]
+async fn h3_negotiates_the_text_report_and_the_page() {
+    const BROWSER: &str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
+    let cases = [
+        ("/", None, true),
+        ("/", Some("*/*"), true),
+        ("/", Some(BROWSER), false),
+        ("/?format=text", Some(BROWSER), true),
+        ("/?format=html", Some("*/*"), false),
+        ("/text", Some(BROWSER), true),
+    ];
+    for (path, accept, text) in cases {
+        let (addr, roots) = start().await;
+        let (headers, body) = get_accepting(addr, roots, path, accept).await;
+        let body = String::from_utf8(body).expect("UTF-8 body");
+        let what = format!("{path} {accept:?}");
+        if text {
+            assert_eq!(
+                headers["content-type"], "text/plain; charset=utf-8",
+                "{what}"
+            );
+            assert!(
+                body.starts_with("mirrust  (h3, TLS 1.3, 127.0.0.1:"),
+                "{what}: {body}"
+            );
+            assert!(body.contains("\nAUDIT  "), "{what}");
+            // QUIC JA4 and the HTTP/3 fingerprint instead of an Akamai one.
+            assert!(body.contains("\n  ja4        q13d"), "{what}: {body}");
+            assert!(body.contains("\n  http3      "), "{what}: {body}");
+            assert!(!body.contains("akamai"), "{what}");
+            assert!(
+                body.is_ascii() && body.lines().all(|line| line.len() <= 78),
+                "{what}"
+            );
+        } else {
+            assert_eq!(
+                headers["content-type"], "text/html; charset=utf-8",
+                "{what}"
+            );
+            assert!(body.starts_with("<!doctype html>"), "{what}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn h3_json_api_ignores_accept() {
+    let (addr, roots) = start().await;
+    let (headers, body) = get_accepting(addr, roots, "/api/clean", Some("text/html")).await;
+    assert_eq!(headers["content-type"], "application/json; charset=utf-8");
+    let json: Value = serde_json::from_slice(&body).expect("JSON body");
+    assert!(json["ja4"].as_str().is_some_and(|ja4| ja4.starts_with('q')));
 }

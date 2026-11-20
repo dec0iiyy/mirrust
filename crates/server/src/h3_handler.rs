@@ -212,6 +212,13 @@ async fn respond(
                 .and_then(|agent| agent.to_str().ok())
                 .unwrap_or_default()
                 .to_owned(),
+            accept: request
+                .headers()
+                .get_all(header::ACCEPT)
+                .iter()
+                .filter_map(|accept| accept.to_str().ok())
+                .collect::<Vec<_>>()
+                .join(", "),
             tls: client.tls.clone(),
             quic: client.quic.clone(),
             http3: Some(

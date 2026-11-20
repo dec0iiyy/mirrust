@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::{
     Config,
     report::{Report, TlsDetails},
-    routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, route, wants_cors},
+    routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, header_value, route, wants_cors},
 };
 
 /// Answers one HTTP/2 request with the routed report.
@@ -36,6 +36,7 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
             path: request.path.clone(),
             method: request.method.clone(),
             user_agent: request.user_agent.clone(),
+            accept: header_value(request.headers().iter().map(String::as_str), "accept"),
             tls: Some(tls),
             http2: Some(request.details.clone()),
             ..Report::default()
