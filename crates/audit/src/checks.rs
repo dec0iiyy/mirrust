@@ -575,7 +575,7 @@ pub(crate) fn tcp_os(input: &Input<'_>) -> Option<Check> {
             TITLE,
             Status::Skip,
             0,
-            "Not measured: this server did not capture the TCP SYN. Behind a proxy or VPN the \
+            "Not measured: this server did not capture the TCP SYN. Behind a proxy or tunnel the \
              TCP stack is the exit's, the User-Agent the device's, and the two disagree here"
                 .to_owned(),
         ));
@@ -600,7 +600,7 @@ pub(crate) fn tcp_os(input: &Input<'_>) -> Option<Check> {
             30,
             format!(
                 "TCP options are those of {}, the User-Agent says {}: another machine opened \
-                 this connection, as a proxy or VPN exit does",
+                 this connection, as a proxy or tunnel exit does",
                 stack.name(),
                 claimed.name()
             ),

@@ -92,8 +92,8 @@ AUDIT  100/100  [####################]  consistent
          Settings, window and header order are those of curl
   [skip] TCP stack against the User-Agent
          Not measured: this server did not capture the TCP SYN. Behind a proxy
-         or VPN the TCP stack is the exit's, the User-Agent the device's, and
-         the two disagree here
+         or tunnel the TCP stack is the exit's, the User-Agent the device's,
+         and the two disagree here
 
 FINGERPRINTS -----------------------------------------------------------------
   ja4        t13d4907h2_0d8feac7bc37_7395dae3b2f3
