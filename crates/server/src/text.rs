@@ -464,6 +464,10 @@ enum CipherKind {
     Weak,
 }
 
+/// Key exchanges without forward secrecy: RSA, static (EC)DH and plain PSK. The ephemeral
+/// ones are `TLS_DHE_` and `TLS_ECDHE_`.
+const NO_FORWARD_SECRECY: [&str; 4] = ["TLS_RSA_", "TLS_DH_", "TLS_ECDH_", "TLS_PSK_"];
+
 fn cipher_kind(name: &str) -> Option<CipherKind> {
     if is_grease(name) || !name.starts_with("TLS_") {
         return None;
@@ -474,7 +478,7 @@ fn cipher_kind(name: &str) -> Option<CipherKind> {
         || name.ends_with("_MD5");
     if broken {
         Some(CipherKind::Broken)
-    } else if name.starts_with("TLS_RSA_") || name.contains("_CBC_") {
+    } else if NO_FORWARD_SECRECY.iter().any(|kx| name.starts_with(kx)) || name.contains("_CBC_") {
         Some(CipherKind::Weak)
     } else {
         None
@@ -811,6 +815,27 @@ mod tests {
         let stripped = without_codes(&coloured);
         assert!(!stripped.contains('\x1b'), "{stripped:?}");
         assert_eq!(stripped, plain, "colour changes no character of the layout");
+    }
+
+    #[test]
+    fn cipher_kinds_follow_forward_secrecy_and_mode() {
+        let kind = |name: &str| cipher_kind(name);
+        assert_eq!(kind("TLS_AES_128_GCM_SHA256"), None);
+        assert_eq!(kind("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"), None);
+        // Ephemeral key exchange keeps forward secrecy; the CBC mode alone is the weakness.
+        let ecdhe_cbc = kind("TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA");
+        assert_eq!(ecdhe_cbc, Some(CipherKind::Weak));
+        for name in [
+            "TLS_RSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256",
+            "TLS_DH_RSA_WITH_AES_128_GCM_SHA256",
+        ] {
+            assert_eq!(kind(name), Some(CipherKind::Weak), "{name}");
+        }
+        assert_eq!(
+            kind("TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"),
+            Some(CipherKind::Broken)
+        );
     }
 
     #[test]

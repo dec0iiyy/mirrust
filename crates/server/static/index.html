@@ -288,7 +288,7 @@ function extension(tls, prefix) {
 function cipherKind(name) {
   if (isGrease(name) || !/^TLS_/.test(name)) return null;
   if (/RC4|3DES|_DES_|NULL|EXPORT|_MD5$|anon/.test(name)) return "bad";
-  if (/^TLS_RSA_|_CBC_/.test(name)) return "warn";
+  if (/^TLS_(RSA|DH|ECDH|PSK)_|_CBC_/.test(name)) return "warn";
   return null;
 }
 
