@@ -489,8 +489,8 @@ The server does not capture SYN packets yet; see [architecture.md](architecture.
 Responses are encoded as tls.peet.ws encodes them:
 
 - Indented responses use two spaces.
-- `<`, `>`, `&`, U+2028 and U+2029 inside strings are written as `<`, `>`, `&`,
-  ` `, ` `.
+- `<`, `>`, `&`, U+2028 and U+2029 inside strings are written as `\u003c`, `\u003e`, `\u0026`,
+  `\u2028`, `\u2029`.
 - Empty lists produced by the details code are `null`.
 - `tcpip` is always present.
 
