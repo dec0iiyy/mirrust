@@ -142,6 +142,7 @@ mirrust --version
 mirrust install (--domain NAME ... | --cert PEM --key PEM) [--acme-email ADDR] [--acme-staging]
         [--log PATH] [--max-connections N] [--dry-run]
 mirrust uninstall [--dry-run]
+mirrust probe [--fail-under N] [--json] -- COMMAND [ARGS...]
 ```
 
 | Flag | Default | Meaning |
@@ -198,6 +199,55 @@ daemon-reload`; it keeps `/var/lib/mirrust` and `/var/log/mirrust`.
 The live path of `install` has run on an Ubuntu 24.04 server on the internet; that of
 `uninstall` has not been run on a machine with systemd. See
 [deploy.md](deploy.md#what-was-tested).
+
+### `probe`
+
+`mirrust probe -- COMMAND [ARGS...]` runs one command against a server that lives only as long
+as the command. It starts the server in the same process on `127.0.0.1` with a random free port
+(TCP for HTTP/1.1 and HTTP/2, UDP on the same number for HTTP/3) and a self-signed certificate
+valid for `127.0.0.1` and `localhost`, runs the command, stops the server when the command
+exits, and prints what the server saw on stderr. The first argument must be `probe`; the serving
+flags `--listen`, `--cert`, `--key` and `--domain` are not accepted after it.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--fail-under N` | off | An integer from 0 to 100. Exit 3 when the lowest audit score of the connections is below N, or when no connection reached the server. |
+| `--json` | off | Print one JSON object per connection per line, the body of [`/api/all`](#apiall) on one line, instead of the text reports. Takes no value. |
+| `-h`, `--help` | | Print the usage of `probe` and exit. |
+| `--` | required | Ends the flags; the command and its arguments follow, and flags after it belong to the command. |
+
+The command is started with these environment variables and keeps stdin, stdout and stderr, so
+its stdout is untouched; everything probe prints goes to stderr, after the command has exited.
+
+| Variable | Value |
+| --- | --- |
+| `MIRRUST_URL` | `https://127.0.0.1:PORT` |
+| `MIRRUST_CACERT` | Path of the server's certificate in PEM, in a temporary directory that is removed when probe ends. Trust it with `curl --cacert`, `SSL_CERT_FILE` or your client's own setting. |
+
+The output is a summary line, `mirrust probe: N connections seen, lowest audit score S/100`,
+and for each connection, in the order the requests were routed, the same plain-text report
+`curl` gets from [`/`](#text-report). With `--json` there is no summary line. Lines that start
+with `mirrust probe:` are messages, not JSON: that no connection reached the server, how many
+TLS handshakes over TCP failed after the ClientHello (usually a client that does not trust
+`MIRRUST_CACERT`; QUIC handshakes are not counted), and why `--fail-under` is not met. Only
+requests that were routed count as connections.
+
+Nothing about the connections is written to disk and the per-request line of the server is
+not printed; the connections are kept in memory until the command has exited.
+
+| Exit code | When |
+| --- | --- |
+| the command's code | The command exited with a non-zero code. It wins over `--fail-under`. |
+| 1 | The command was ended by a signal, so it has no code. |
+| 2 | Usage error, or probe could not start the server or the command. |
+| 3 | `--fail-under N` and the lowest audit score is below N, or no connection was seen. |
+| 0 | Otherwise, including no connection without `--fail-under`. |
+
+Probe tests a client on loopback, not on your network. The TCP checks of the audit read the
+SYN the kernel keeps of each connection, which only Linux does (`TCP_SAVE_SYN`); here it is the
+SYN of a loopback connection, and on macOS and Windows the check is not measured. A proxy,
+tunnel or middlebox between the client and a real server is not part of the test, so a score
+from probe says how the client looks, not how it looks from the other side of your network.
 
 ### Built-in ACME
 

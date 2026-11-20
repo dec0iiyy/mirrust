@@ -10,7 +10,7 @@ http2         HTTP/2 frame parser, Akamai fingerprint, one-request responder (to
 quic          QUIC Initial decryption and CRYPTO reassembly                  (rustls::quic for crypto)
 http3         HTTP/3 SETTINGS, unidirectional stream types, fingerprint      (no I/O)
 tcpip         TCP SYN parser, tcp_syn details, p0f signature                 (no I/O)
-server        mirrust binary: listeners, TLS, HTTP/1, HTTP/2, HTTP/3, routes, request log
+server        mirrust binary: listeners, TLS, HTTP/1, HTTP/2, HTTP/3, routes, request log, probe
 fpdiff        (crates/diff) fingerprint comparison, library and CLI; uses fingerprint
 golden        snapshot files under corpus/ for the tests; a dev-dependency only
 ```
@@ -246,6 +246,25 @@ JSON Lines was chosen over a columnar format such as Parquet: no large dependenc
 readable as soon as it is flushed, a crash loses only the unflushed lines rather than the whole
 file, appending across restarts needs nothing special, and `jq`, DuckDB and pandas read it
 directly.
+
+### Probe
+
+`mirrust probe` is split in two. `probe_server.rs` in the library is `ProbeServer`: it binds
+`127.0.0.1:0` for TCP, binds UDP on the same port (another TCP port is tried when that one is
+taken, up to 16 times), makes a self-signed certificate (the generator of the server's default mode, kept
+also as PEM) and runs `serve` and `serve_h3` on a `Config` whose `visits` field is set.
+`probe.rs` in the binary reads the arguments, writes the certificate to a file in a temporary
+directory that a drop guard removes, runs the command with `std::process::Command` on a
+blocking thread, and turns what the server saw into the report and the exit code.
+
+`Config::visits` is the in-memory sink. `routes::route`, which every handler calls once per
+routed request, pushes a clone of the `Report` into it instead of printing the one-line summary
+on stdout, and the TCP handshake-failure branch of `handle` increments a counter. `ProbeServer`
+renders the text report (`text::render`), the audit score and the `/api/all` JSON from those
+reports only when it stops, so nothing is rendered on the connection tasks. The request log is
+never set, so nothing about visitors reaches the disk. The failure summary of `FailureLog` is
+muted: probe reports the counted handshakes itself. The process exit codes are chosen by a pure
+function of the command's exit code, the scores and `--fail-under`.
 
 ## Design decisions
 

@@ -122,6 +122,20 @@ so curl, wget and scripts get text and browsers get the page; `?format=html` and
 force either, `/text` is always text, and `?color=1` adds ANSI colour for a terminal (off by
 default, so a pipe or a file stays clean).
 
+## Test your own client
+
+`mirrust probe` starts a throwaway server on 127.0.0.1, runs your command with `MIRRUST_URL` and
+`MIRRUST_CACERT` set, and prints the report of each connection it made on stderr:
+
+```console
+$ mirrust probe -- sh -c 'curl -s --cacert "$MIRRUST_CACERT" "$MIRRUST_URL" >/dev/null'
+$ mirrust probe --fail-under 80 -- ./run-my-client   # exit 3 if the lowest audit score is below 80
+```
+
+It runs on loopback: TCP checks come from the loopback SYN on Linux (not measured on macOS and
+Windows), and a proxy or middlebox on a real network is not part of the test. Flags and exit
+codes: [docs/reference.md](docs/reference.md#probe).
+
 ## Deploy
 
 On a Linux server with systemd and a DNS `A` record for your host name pointing at it:
