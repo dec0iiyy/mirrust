@@ -74,7 +74,7 @@ const START_POLL: Duration = Duration::from_millis(500);
 /// How long a service that reported `active` must stay `active` before `install` believes it.
 /// The unit has `Type=exec`, so it is `active` as soon as the program has been executed, a few
 /// milliseconds before a server that cannot bind port 443 exits. After that exit the unit is
-/// `activating` for the unit's `RestartSec=` (5 seconds), which is longer than this.
+/// `activating` for the unit's `RestartSec=` (30 seconds), which is longer than this.
 const START_SETTLE: Duration = Duration::from_secs(2);
 
 /// What `install` or `uninstall` was asked to do.
@@ -1230,8 +1230,11 @@ mod tests {
 
     #[test]
     fn the_unit_waits_longer_to_restart_than_install_waits_to_settle() {
-        assert!(TEMPLATE.contains("\nRestartSec=5s\n"), "RestartSec changed");
-        assert!(START_SETTLE < Duration::from_secs(5));
+        assert!(
+            TEMPLATE.contains("\nRestartSec=30s\n"),
+            "RestartSec changed"
+        );
+        assert!(START_SETTLE < Duration::from_secs(30));
     }
 
     #[test]

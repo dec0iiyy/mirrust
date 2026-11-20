@@ -15,10 +15,12 @@ Description=mirrust, an HTTPS server that reports the client's TLS and HTTP fing
 # Start once addresses are configured, so that a --listen with a specific address can bind.
 Wants=network-online.target
 After=network-online.target
-# No start rate limit. A failing service is started again every five seconds (Restart= and
+# No start rate limit. A failing service is started again every 30 seconds (Restart= and
 # RestartSec= below) for as long as it fails, and nothing here gives up. The default limit, 5
-# starts in 10 seconds, would not stop that either with a 5 second delay; this line keeps it
-# that way if a drop-in shortens RestartSec=. RestartSteps= and RestartMaxDelaySec= would give
+# starts in 10 seconds, would not stop that either with a 30 second delay; this line keeps it
+# that way if a drop-in shortens RestartSec=. The delay is long on purpose: each start of the
+# built-in ACME client without a cached certificate may place an order with the CA, which
+# limits new orders and failed validations (docs/deploy.md). RestartSteps= and RestartMaxDelaySec= would give
 # a growing delay, but they need systemd 254 (Debian 12 has 252, and older systemd ignores
 # unknown directives with a warning), so they are not used.
 StartLimitIntervalSec=0
@@ -52,7 +54,7 @@ TimeoutStopSec=20s
 # A start that fails at once, for example because --domain is not a valid name, is retried
 # too; "systemctl status mirrust" and the journal show the reason.
 Restart=on-failure
-RestartSec=5s
+RestartSec=30s
 
 # --- User and privileges ---
 
@@ -130,8 +132,10 @@ SystemCallErrorNumber=EPERM
 
 # Upper bound on the service's memory. At the limit the kernel kills the process and
 # Restart=on-failure starts it again. An idle mirrust uses a few megabytes; each open
-# connection adds its buffers (see "Bounded memory per client" in docs/architecture.md).
-MemoryMax=256M
+# connection adds its buffers (see "Bounded memory per client" in docs/architecture.md), so a
+# flood up to the connection limit can need more than a quiet server does. 512M matches the
+# limit of the container files and is a bound, not a measured need.
+MemoryMax=512M
 # Open files. Every TCP connection takes one descriptor for up to 15 seconds.
 LimitNOFILE=65536
 

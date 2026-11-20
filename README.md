@@ -112,7 +112,7 @@ On a Linux server with systemd and a DNS `A` record for your host name pointing 
 
 ```console
 $ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh
-$ sudo mirrust install --domain mirror.example.com
+$ sudo /usr/local/bin/mirrust install --domain mirror.example.com
 ```
 
 The first command downloads the binary for the machine (Linux or macOS, x86_64 or arm64),

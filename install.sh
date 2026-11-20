@@ -252,12 +252,24 @@ on_path() {
     esac
 }
 
-# Prints what to do next. $cmd is how to call the binary from here.
+# Prints $1 so that a shell reads it back as one word: unchanged when it holds only safe
+# characters, else in single quotes.
+shquote() {
+    case $1 in
+        *[!A-Za-z0-9._/+@:=,-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+# Prints what to do next. $cmd is how to call the binary from here, and $abs is its full path,
+# which the sudo commands use: on some distributions (RHEL, Fedora) sudo's secure_path leaves
+# out /usr/local/bin, so "sudo mirrust" would not be found even when mirrust is on your PATH.
 next_steps() {
+    abs=$(shquote "$dest_dir/mirrust")
     if on_path "$dest_dir"; then
         cmd=mirrust
     else
-        cmd=$dest_dir/mirrust
+        cmd=$abs
     fi
     printf '\n'
     say "installed $version as $dest_dir/mirrust"
@@ -269,11 +281,11 @@ next_steps() {
     if [ "$os" = linux ]; then
         printf '%s\n' "Next steps"
         printf '%s\n' "  A server with a DNS A record for your host name (Linux with systemd):"
-        printf '%s\n' "    sudo $cmd install --domain your.host"
+        printf '%s\n' "    sudo $abs install --domain your.host"
         printf '%s\n' "  It sets mirrust up as a service on TCP and UDP port 443 with a Let's Encrypt"
         printf '%s\n' "  certificate (--domain accepts its Subscriber Agreement,"
         printf '%s\n' "  https://letsencrypt.org/repository/). Without systemd, run it directly:"
-        printf '%s\n' "    sudo $cmd --domain your.host"
+        printf '%s\n' "    sudo $abs --domain your.host"
         printf '%s\n' "  A quick look on this machine:"
     else
         printf '%s\n' "A quick look on this machine:"
