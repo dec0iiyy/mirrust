@@ -88,7 +88,9 @@ jobs:
           rustup toolchain install 1.88 --profile minimal --no-self-update
           rustup default 1.88
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo check --workspace --locked
+      # --all-targets: the tests, examples and benches must build with the minimum version
+      # too, or a contributor on it could not run them.
+      - run: cargo check --workspace --all-targets --locked
 
   install-script:
     # install.sh against a fake release served from a local directory: no network, and not

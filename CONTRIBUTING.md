@@ -30,9 +30,10 @@ $ cargo test --workspace --locked
 ```
 
 The workflow runs the tests on Linux and macOS, and also runs `cargo check --workspace
---locked` with Rust 1.88, the minimum supported version (`rust-version` in `Cargo.toml`); no
-local check with 1.88 has been made yet. Do not use language or library features newer than
-that.
+--all-targets --locked` with Rust 1.88, the minimum supported version (`rust-version` in
+`Cargo.toml`), so the tests and examples have to build with it too. That command passed on
+macOS with Rust 1.88.0 on 2026-11-20 (`rustup toolchain install 1.88.0 --profile minimal`,
+then `cargo +1.88.0 check ...`). Do not use language or library features newer than that.
 
 The workspace lints are strict: `unsafe` code is forbidden, public items need documentation,
 and Clippy's `pedantic` group and `unwrap_used` are on. `-D warnings` turns every lint warning
