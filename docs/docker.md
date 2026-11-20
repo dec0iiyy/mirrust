@@ -34,7 +34,7 @@ What each part does:
 | `--cap-drop ALL` | The process needs no Linux capability. |
 | `--security-opt no-new-privileges:true` | The process cannot gain privileges. |
 | `--read-only` | The root file system is read-only; only the volume is writable. |
-| `--memory 512m --pids-limit 512` | Limits. They are a guess and have not been measured under load: raise them if the container is killed or cannot start threads. |
+| `--memory 512m --pids-limit 512` | Limits. The memory limit is the one of the systemd unit: with all 1024 connection slots held by the most expensive TCP client the server measured 215 MiB on macOS (see "Bounded number of clients" in [architecture.md](architecture.md#design-decisions)); the container itself was not measured under load. The process limit is a guess: raise it if the container cannot start threads. |
 | `-v mirrust-data:/data` | A named volume for the request log (and, later, a certificate cache). It starts out owned by the image's user, UID 10001. |
 | `--listen 0.0.0.0:443` | The default of the image; the server must listen on all interfaces of the container for the published ports to reach it. |
 | `--log /data/requests.jsonl` | One JSON line per request and per failed TLS handshake. Leave it out for no log. |

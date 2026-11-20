@@ -378,7 +378,10 @@ What the unit does, in short (every line is commented in the file):
   does not order a certificate again.
 - Mounts the file system read-only for the service, except `/var/log/mirrust` and
   `/var/lib/mirrust`.
-- Limits memory to 256 MiB and open files to 65536, and restarts the service on failure.
+- Limits memory to 512 MiB and open files to 65536, and restarts the service on failure.
+  With all 1024 connection slots held by the most expensive TCP client, the server measured
+  215 MiB ([architecture.md](architecture.md#design-decisions), "Bounded number of
+  clients"); if you raise `--max-connections`, raise `MemoryMax=` in proportion.
 - Stops the service with SIGINT. mirrust flushes the request log and exits with status 0 on
   SIGINT and on SIGTERM alike; the unit names SIGINT so that systemd counts the exit as clean.
 

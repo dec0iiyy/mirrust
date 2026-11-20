@@ -133,8 +133,12 @@ SystemCallErrorNumber=EPERM
 # Upper bound on the service's memory. At the limit the kernel kills the process and
 # Restart=on-failure starts it again. An idle mirrust uses a few megabytes; each open
 # connection adds its buffers (see "Bounded memory per client" in docs/architecture.md), so a
-# flood up to the connection limit can need more than a quiet server does. 512M matches the
-# limit of the container files and is a bound, not a measured need.
+# flood up to the connection limit needs more than a quiet server does. Measured with all
+# 1024 connection slots held by the most expensive TCP client there is (an HTTP/2 request
+# with 60 KB of headers whose answer waits for a zero window): 215 MiB, on macOS, with
+# .github/scripts/memory-under-load.py. The limit is that with a wide margin, for the Linux
+# allocator and for QUIC, neither of which was measured; the receive windows of 1024 QUIC
+# connections are 256 MiB by configuration. Raise it together with --max-connections.
 MemoryMax=512M
 # Open files. Every TCP connection takes one descriptor for up to 15 seconds.
 LimitNOFILE=65536

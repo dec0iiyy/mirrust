@@ -282,6 +282,26 @@ directly.
 - **Bounded number of clients.** At most `--max-connections` connections (1024 by default) are
   open at once, TCP and QUIC together; the rest are closed or refused before any of the above is
   allocated for them. Refusals are counted and reported on stderr at most once per 10 seconds.
+
+  What the two bounds add up to was measured with `.github/scripts/memory-under-load.py`,
+  which starts a server, holds all 1024 slots with one kind of client and reads the
+  server's resident memory from `ps` (release build, macOS on arm64, 2026-11-20):
+
+  | 1024 connections that each | Resident memory |
+  | --- | --- |
+  | (no connection) | 9 MiB |
+  | send nothing | 25 MiB |
+  | send 60 KB of a ClientHello that claims 65 KB | 154 MiB |
+  | finish TLS and send 16 KB of an HTTP/1.1 head that does not end | 59 MiB |
+  | finish TLS and send an HTTP/2 request with 62 KB of DATA that does not end | 156 MiB |
+  | finish an HTTP/2 request with 60 KB of headers and a zero window, so that the report waits | 215 MiB |
+  | a quarter each of the first four | 99 MiB |
+
+  The memory is not given back to the system when the connections close; it is used again.
+  `MemoryMax=512M` in the systemd unit is the largest of these with a wide margin, because
+  two things were not measured: the Linux binary, which has another allocator, and QUIC,
+  where a connection may hold 256 KiB of received data by configuration, 256 MiB for 1024
+  connections.
 - **No caching of reports.** Every response says `Cache-Control: no-store`, because a report is
   only true for the connection it was sent on.
 - **Text for terminals.** `/` answers a client that does not accept `text/html` with a plain
