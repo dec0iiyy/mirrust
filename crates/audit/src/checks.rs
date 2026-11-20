@@ -247,10 +247,16 @@ pub(crate) fn tls_traits(input: &Input<'_>) -> Option<Check> {
     })
 }
 
+/// A `User-Agent` version for which the dataset has another fingerprint than the one sent.
+///
+/// The claimed version has to be at or below the newest older version in the dataset
+/// ([`Client::previous_version`]). Below the matched entry's first version is not enough: that
+/// is the oldest version that was looked at, and the ones between it and the previous entry
+/// were not. Chrome 117 to 119 are an example, between the profiles of 115 and 120.
 pub(crate) fn ua_version(input: &Input<'_>) -> Option<Check> {
     let (agent, client) = (input.agent?, identified(input)?);
-    let (major, (first, _)) = (agent.major?, client.version_range()?);
-    if !client.agrees_with(agent.family) || major >= first {
+    let (major, previous) = (agent.major?, client.previous_version()?);
+    if !client.agrees_with(agent.family) || major > previous {
         return None;
     }
     Some(check(
@@ -259,7 +265,8 @@ pub(crate) fn ua_version(input: &Input<'_>) -> Option<Check> {
         Status::Warn,
         10,
         format!(
-            "The User-Agent says version {major}; this TLS fingerprint is that of {}",
+            "The User-Agent says version {major}; this TLS fingerprint is that of {}, and \
+             version {previous} still had another",
             named(client)
         ),
     ))
@@ -890,14 +897,47 @@ mod tests {
     }
 
     #[test]
-    fn an_older_user_agent_than_the_fingerprint_warns() {
+    fn a_user_agent_version_that_the_dataset_has_with_another_fingerprint_warns() {
         let chrome = with_http2("Chrome");
         let (first, _) = chrome.version_range().expect("the entry has versions");
-        let old = CHROME_UA.replace("Chrome/160", &format!("Chrome/{}", first - 1));
+        let previous = chrome.previous_version().expect("older Chrome entries");
+        assert!(
+            previous + 1 < first,
+            "there are unobserved versions between"
+        );
         let hello = chrome_like();
-        let mut input = Input::new(&hello, &old);
-        input.known = Match::Exact(chrome);
-        assert_eq!(ua_version(&input).expect("applies").status, Status::Warn);
+        let claims = |major: u32| {
+            let user_agent = CHROME_UA.replace("Chrome/160", &format!("Chrome/{major}"));
+            let mut input = Input::new(&hello, &user_agent);
+            input.known = Match::Exact(chrome);
+            ua_version(&input)
+        };
+        let found = claims(previous).expect("the dataset has this version with another hello");
+        assert_eq!(found.status, Status::Warn);
+        assert!(
+            found.detail.contains(&format!("version {previous} still")),
+            "{}",
+            found.detail
+        );
+        assert!(claims(previous - 20).is_some());
+        // Not observed: the versions between the previous entry and this one.
+        assert_eq!(claims(previous + 1), None);
+        assert_eq!(claims(first - 1), None);
+        assert_eq!(claims(first), None);
+        assert_eq!(claims(first + 5), None);
+    }
+
+    #[test]
+    fn an_older_tool_version_is_not_held_against_the_only_capture_of_that_tool() {
+        // One curl was captured. An older curl with the same TLS library sends the same hello.
+        let curl = fingerprint::known::clients()
+            .iter()
+            .find(|client| client.family() == "curl")
+            .expect("a curl entry");
+        let hello = ClientHello::default();
+        let mut input = Input::new(&hello, "curl/7.88.1");
+        input.known = Match::Exact(curl);
+        assert_eq!(ua_version(&input), None);
     }
 
     #[test]

@@ -52,6 +52,27 @@ impl Client {
         self.version_min.zip(self.version_max)
     }
 
+    /// The newest version of this entry's family that the dataset has with another
+    /// fingerprint: the highest last version, among the entries of the same family, that is
+    /// below this entry's first. `None` when the entry has no versions or is the oldest of its
+    /// family.
+    ///
+    /// The versions after it and before this entry's first were not observed, so the dataset
+    /// does not say which fingerprint they send. An entry's first version is the oldest one
+    /// that was looked at, a uTLS profile's name for most browsers, not the first that sent
+    /// the fingerprint.
+    #[must_use]
+    pub fn previous_version(&self) -> Option<u32> {
+        let (first, _) = self.version_range()?;
+        clients()
+            .iter()
+            .filter(|other| other.family == self.family)
+            .filter_map(Self::version_range)
+            .map(|(_, last)| last)
+            .filter(|&last| last < first)
+            .max()
+    }
+
     /// The TLS library, when known.
     #[must_use]
     pub fn library(&self) -> Option<&str> {
@@ -580,6 +601,28 @@ mod tests {
             let parsed = UserAgent::parse(text).map(|agent| (agent.family, agent.major));
             assert_eq!(parsed, expected, "User-Agent {text:?}");
         }
+    }
+
+    #[test]
+    fn the_previous_version_is_the_newest_older_one_of_the_family() {
+        let by_version = |family: &str, version: &str| {
+            clients()
+                .iter()
+                .find(|c| c.family() == family && c.version() == version)
+                .unwrap_or_else(|| panic!("no entry {family} {version}"))
+        };
+        // Chrome 96-114 and 100-115 come before the two entries that start at 120.
+        let padded = by_version("Chrome", "120 (hello with the padding extension)");
+        assert_eq!(padded.previous_version(), Some(115));
+        assert_eq!(
+            by_version("Chrome", "120-131").previous_version(),
+            Some(115)
+        );
+        assert_eq!(by_version("Chrome", "133").previous_version(), Some(131));
+        assert_eq!(by_version("Chrome", "58-62").previous_version(), None);
+        assert_eq!(by_version("Firefox", "120").previous_version(), Some(105));
+        // One curl version was captured, so nothing is known about older ones.
+        assert_eq!(by_version("curl", "8.7.1").previous_version(), None);
     }
 
     #[test]

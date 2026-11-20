@@ -681,6 +681,26 @@ row in `Client::agrees_with`.
   build option or TLS library release can change the fingerprint.
 - Versions are not compared. A Chrome 133 `User-Agent` with the JA4 of Chrome 100 is
   `consistent: true`.
+- The version ranges are what was looked at, not when a fingerprint began or ended. For the
+  20 browser entries they are the names of uTLS profiles, and a range spans the profiles that
+  share a JA4; nobody captured the versions between them. Three consequences:
+  - **Chrome 134 to 159 are not in the dataset.** The newest entries are the profile of 133
+    and a capture of Canary 160, which differ by one extension (51764, `trust_anchors`). A
+    real Chrome of a version between is an `exact` match with whichever of the two it sends
+    like, and the report then names that version, not the browser's. If it sends something
+    else it is a `ciphers` match or `none`, which costs 5 or 10 points in the `audit`
+    (`tls_known`) and leaves the verdict `consistent`; the `tls_traits` check then judges it
+    by the extensions Chromium always sends.
+  - **The entry "Chrome 120 (hello with the padding extension)" is not about version 120.**
+    It is the hello of the entry "120-131" plus padding, which BoringSSL adds when a hello
+    would be between 256 and 511 bytes long: a matter of the server name's length and of the
+    key shares, not of the version. uTLS names the profile after 120; nothing in the dataset
+    says which version first sent this hello. (Both entries have the `encrypted_client_hello`
+    extension, which Chrome's release notes put in version 117; that was not checked here.)
+  - Because of this the `audit` check `ua_version` does not compare the `User-Agent` with an
+    entry's first version. It warns only when the claimed version is one the dataset has
+    with another fingerprint: at or below the last version of the newest older entry of the
+    family (115 for both entries that start at 120).
 - The HTTP/2 fingerprint is stored in the dataset but not matched.
 
 ## Audit
@@ -747,7 +767,7 @@ they are reported:
 | `tls_known` | The JA4 with the known-client dataset. A hello whose cipher and extension hashes equal an entry's, differing only in the first JA4 part (SNI, ALPN), counts as that client. | 5 for a cipher-list match only, 10 for no match |
 | `ua_tls` | The family the `User-Agent` names with the family of the matched client. Also reports a missing `User-Agent`. | 40; 25 when only the cipher list matched; 10 for no `User-Agent` |
 | `tls_traits` | Only without a dataset match and with a browser `User-Agent`: the extensions that engine always sends (Chromium: GREASE, `compress_certificate`, `application_settings` when `h2` is offered, no `record_size_limit`; Firefox: no GREASE, `record_size_limit`, `delegated_credentials`, no `application_settings`; Safari on an Apple platform: GREASE, no `application_settings`; WebKitGTK also says Safari and is not checked). | 30 |
-| `ua_version` | The major version in the `User-Agent` with the first version of the matched entry. | 10 when the `User-Agent` is older |
+| `ua_version` | The major version in the `User-Agent` with the dataset: a warning when the dataset has that version, or a newer one that is still older than the matched entry, with another fingerprint. A version between two entries was not observed and is not judged, and neither is one older than the only entry of its family. | 10 |
 | `alps_alpn` | Every protocol named in `application_settings` (17513 or 17613) must also be in ALPN. | 30 |
 | `grease` | A hello that uses GREASE has it in cipher suites, extensions, groups and versions alike. | 20 |
 | `http2` | The Akamai fingerprint with the one recorded for the matched client; without one, the pseudo-header order with the claimed engine's (Chromium `m,a,s,p`, Firefox `m,p,a,s`). | 30 |
