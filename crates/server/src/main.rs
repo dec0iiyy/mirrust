@@ -20,12 +20,14 @@ use server::{
 use tokio::net::TcpListener;
 
 mod install;
+mod probe;
 
 const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM | --domain NAME ...]
                   [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
                   [--cors-key KEY] [--log PATH] [--max-connections N]
        mirrust install (--domain NAME ... | --cert PEM --key PEM) [--dry-run] ...
        mirrust uninstall [--dry-run]
+       mirrust probe [--fail-under N] [--json] -- COMMAND [ARGS...]
        mirrust --version
 
   -h, --help         print this text and exit
@@ -33,6 +35,9 @@ const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM | --do
 
 install sets mirrust up as a systemd service (Linux, as root) and uninstall removes it; see
 mirrust install --help for their flags.
+
+probe runs COMMAND against a throwaway server on 127.0.0.1 and prints how its connections
+looked; see mirrust probe --help.
 
   --listen           address to listen on, TCP and UDP for HTTP/3 (default 127.0.0.1:8443,
                      0.0.0.0:443 with --domain)
@@ -314,10 +319,30 @@ fn install_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
+/// `mirrust probe`, which has its own exit codes and so ends the process itself.
+async fn run_probe(args: impl IntoIterator<Item = String>) -> anyhow::Result<()> {
+    let request = match probe::parse(args) {
+        Ok(probe::Parsed::Run(request)) => request,
+        Ok(probe::Parsed::Help) => {
+            println!("{}", probe::USAGE);
+            return Ok(());
+        }
+        Err(error) => {
+            eprintln!("mirrust probe: {error:#}");
+            std::process::exit(probe::EXIT_USAGE);
+        }
+    };
+    std::process::exit(probe::run(request).await)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     install_crypto_provider();
-    let mut args = match parse_args(std::env::args().skip(1))? {
+    let mut words = std::env::args().skip(1).peekable();
+    if words.next_if_eq("probe").is_some() {
+        return run_probe(words).await;
+    }
+    let mut args = match parse_args(words)? {
         Command::Help => {
             println!("{USAGE}");
             return Ok(());

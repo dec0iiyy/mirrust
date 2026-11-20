@@ -25,7 +25,7 @@ http3 = { path = "../http3" }
 instant-acme.workspace = true
 quic = { path = "../quic" }
 quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
-rcgen.workspace = true
+rcgen = { workspace = true, features = ["pem"] }
 rustls.workspace = true
 serde_json.workspace = true
 tcp-save-syn.workspace = true

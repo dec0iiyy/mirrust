@@ -61,7 +61,10 @@ impl Reply {
 /// cannot answer, such as `/api/raw` without a captured ClientHello, gets
 /// `{"error": "..."}` with status 500.
 pub(crate) fn route(report: &Report, config: &Config) -> Reply {
-    log(report);
+    match &config.visits {
+        Some(visits) => visits.record(report),
+        None => log(report),
+    }
     if let Some(log) = &config.log {
         log.record(report);
     }

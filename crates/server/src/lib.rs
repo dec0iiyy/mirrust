@@ -21,6 +21,7 @@ mod http1;
 mod http2_handler;
 mod limit;
 mod printable;
+mod probe_server;
 #[cfg(test)]
 mod properties;
 mod quic_details;
@@ -47,6 +48,7 @@ use tokio_rustls::TlsAcceptor;
 pub use crate::failures::FailureLog;
 pub use crate::h3_handler::serve_h3;
 pub use crate::limit::ConnectionLimit;
+pub use crate::probe_server::{ProbeServer, Seen, Visit, Visits};
 pub use crate::request_log::{LogWriter, RequestLog};
 
 use crate::acme::AcmeChallenges;
@@ -80,6 +82,10 @@ pub struct Config {
     /// these, takes a connection slot like any other, and is neither logged nor counted as a
     /// failure.
     pub challenges: Option<AcmeChallenges>,
+    /// Keeps each routed request, and counts each failed TLS handshake, in memory (see
+    /// [`ProbeServer`]). With this set, the one-line summary of each request that is otherwise
+    /// printed on stdout is not printed. `None` prints it and keeps nothing.
+    pub visits: Option<Visits>,
 }
 
 impl Config {
@@ -98,6 +104,7 @@ impl Default for Config {
             connections: ConnectionLimit::default(),
             failures: FailureLog::default(),
             challenges: None,
+            visits: None,
         }
     }
 }
@@ -153,10 +160,15 @@ fn with_http_alpn(mut config: ServerConfig) -> ServerConfig {
 ///
 /// Fails only if key generation or signing fails.
 pub fn self_signed_cert() -> io::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
-    let names = vec!["localhost".to_owned(), "127.0.0.1".to_owned()];
-    let certified = rcgen::generate_simple_self_signed(names).map_err(io::Error::other)?;
+    let certified = self_signed()?;
     let key = PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
     Ok((vec![certified.cert.der().clone()], key.into()))
+}
+
+/// The certificate and key behind [`self_signed_cert`], for callers that need the PEM too.
+fn self_signed() -> io::Result<rcgen::CertifiedKey<rcgen::KeyPair>> {
+    let names = vec!["localhost".to_owned(), "127.0.0.1".to_owned()];
+    rcgen::generate_simple_self_signed(names).map_err(io::Error::other)
 }
 
 /// Asks the kernel to keep the TCP SYN of each connection `listener` accepts from now on, so
@@ -238,6 +250,9 @@ async fn handle(
                 // Nothing was negotiated, hence version 0.
                 let details = TlsDetails::new(&hello, 0, Transport::Tcp);
                 log.record_failed_handshake(peer, details, &error);
+            }
+            if let Some(visits) = &config.visits {
+                visits.record_failed_handshake();
             }
             return Err(error);
         }
