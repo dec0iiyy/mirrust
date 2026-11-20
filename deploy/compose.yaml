@@ -30,9 +30,16 @@ services:
       - 0.0.0.0:443 # All interfaces inside the container; the port stays 443.
       - --log # Request log, one JSON line per request and per failed TLS handshake.
       - /data/requests.jsonl # The log file in the volume; the image has no shell, so read it as docs/docker.md describes.
-      # Without the next four lines the server uses a self-signed certificate for localhost. For a real
-      # host name, put fullchain.pem and privkey.pem for it (for example mirror.example.com) into ./certs
-      # next to this file, readable by UID 10001, and remove the leading "# " from these lines and from ./certs above.
+      # Without the lines below the server uses a self-signed certificate for localhost. For a real host name,
+      # the simplest way is built-in ACME: remove the leading "# " from the next four lines and put your host name
+      # in place of mirror.example.com (its DNS A record must point at this machine, TCP and UDP 443 must be open).
+      # Add --acme-staging first to try it without using up Let's Encrypt's rate limits.
+      # - --domain # The host name to get a Let's Encrypt certificate for.
+      # - mirror.example.com # Replace with your host name.
+      # - --acme-dir # Where the account key and the certificates are kept.
+      # - /data/acme # In the volume, so they survive container updates.
+      # Or use certificate files: put fullchain.pem and privkey.pem into ./certs next to this file, readable by
+      # UID 10001, and remove the leading "# " from the next four lines and from ./certs above (not both ways).
       # - --cert # PEM certificate chain.
       # - /certs/fullchain.pem # Replace with the file for your host name.
       # - --key # PEM private key.

@@ -5,8 +5,8 @@ service on TCP and UDP port 443, with a certificate from Let's Encrypt that mirr
 renews by itself. `mirror.example.com` stands for your host name throughout. To use certbot or
 other certificate files instead, see [Alternative: certificate files](#alternative-certificate-files).
 
-What has been run, on an Ubuntu 24.04 server (x86_64, systemd 255): the release binary built
-by the `Linux build` workflow, under a copy of the unit as it was before the built-in ACME
+What has been run, on an Ubuntu 24.04 server (x86_64, systemd 255): the release binary
+built in CI on Ubuntu 24.04, under a copy of the unit as it was before the built-in ACME
 client existed (the certificate-file variant below), listening on port 8443 with a
 self-signed certificate passed through `LoadCredential=`. `systemd-analyze verify` reported
 nothing for that unit and `systemd-analyze security` rated it 1.6, "OK". The service ran as a
@@ -436,38 +436,9 @@ connections open at that moment and the service is listening again right after.
 
 ## Docker
 
-`deploy/Dockerfile` builds the binary in a Rust image and copies it into a Debian slim image
-that runs it as a non-root user. Build from the repository root:
-
-```console
-$ docker build -f deploy/Dockerfile -t mirrust .
-```
-
-Run it with both protocols published, and the certificate and key in a directory that UID 10001
-can read (the files under `/etc/letsencrypt` are readable by root only, so copy them):
-
-```console
-$ docker run -d --name mirrust --restart unless-stopped \
-    -p 443:443/tcp -p 443:443/udp \
-    -v /srv/mirrust/certs:/certs:ro \
-    mirrust --listen 0.0.0.0:443 --cert /certs/fullchain.pem --key /certs/privkey.pem
-```
-
-Notes:
-
-- Without `--cert` and `--key` the container serves a self-signed certificate for `localhost`.
-- `--domain` is not set up in this image: the Debian slim image does not normally include
-  `ca-certificates`, so mirrust may be unable to check Let's Encrypt's certificate. Use
-  certificate files as above, or add `ca-certificates` to the image and mount a directory
-  that UID 10001 can write for `--acme-dir`. Neither has been run.
-- Publish the container's port 443 as the host's port 443. The `Alt-Svc` header names the port
-  mirrust listens on inside the container, so a mapping such as `-p 443:8443` would point
-  HTTP/3 clients at the wrong port.
-- The process is not root and has no capabilities. Docker Engine 20.10 and later lets such a
-  process bind port 443 inside a container's own network namespace. On another runtime, or if
-  the bind is refused, add `--sysctl net.ipv4.ip_unprivileged_port_start=0`.
-- For a request log, mount a directory that UID 10001 can write and add `--log` with a path
-  inside it.
+A container image and a Compose file are described in [docker.md](docker.md): a static binary
+on a distroless image, run as UID 10001 with no capabilities, built and smoke-tested in CI. With
+the built-in ACME client the whole deployment is `docker run` with `--domain` and a volume.
 
 ## What is not there yet
 

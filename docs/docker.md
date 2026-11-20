@@ -220,56 +220,49 @@ The Rust version in the tag must stay at or above `rust-version` in `Cargo.toml`
 
 ## Built-in ACME (Let's Encrypt)
 
-> **Placeholder for the maintainer.** This section is to be filled in when built-in ACME is
-> merged. What follows is what the flag names suggest and is **not verified**: it was written
-> before the code exists and may be wrong in every detail.
+With `--domain` the server gets and renews its own Let's Encrypt certificate (see
+[deploy.md](deploy.md) and the flags in [reference.md](reference.md)), so the container needs no
+certificate files, only a writable place to keep the account key and the certificates:
 
-The server is expected to get and renew its certificate itself, through these flags:
-`--domain` (the host name), `--acme-dir` (the certificate cache directory), `--acme-email`
-(a contact address) and `--acme-staging` (use Let's Encrypt's staging service while testing).
-The image and `deploy/compose.yaml` are prepared for it in two ways only: `/data` is a
-writable volume owned by the server's user, which is the natural place for `--acme-dir`
-(for example `--acme-dir /data/acme`), and the image contains CA certificates.
+```console
+$ docker run -d --name mirrust --restart unless-stopped \
+    -p 443:443/tcp -p 443:443/udp \
+    --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+    --cap-drop ALL --security-opt no-new-privileges:true --read-only \
+    --memory 512m --pids-limit 512 \
+    -v mirrust-data:/data \
+    ghcr.io/dec0iiyy/mirrust:<version> \
+    --domain mirror.example.com --acme-dir /data/acme --log /data/requests.jsonl
+```
 
-To be checked against the merged code and the docs of that change before this section is
-written:
+- `--domain` makes the server listen on `0.0.0.0:443` unless you pass `--listen`.
+- The validation runs on port 443 over TLS (TLS-ALPN-01), so nothing else must be published, and
+  the DNS `A` record of the host name must point at the Docker host.
+- The certificates live in `/data/acme` (mode 0700, owned by UID 10001 through the volume), so
+  they survive `docker rm` and image updates. Do not run two containers with the same volume.
+- Outgoing HTTPS to Let's Encrypt needs the CA certificates that the distroless static image
+  contains, and a working resolver; the `read_only` root file system does not get in the way
+  because the cache is on the volume.
+- Try it with `--acme-staging` first: the staging service has generous rate limits, and its
+  certificates are not trusted by browsers.
+- In `deploy/compose.yaml` the same lines are present as comments in `command:`.
 
-- how the certificate is obtained (the ACME challenge type, and so which port must be
-  reachable: the server has no listener on port 80 today, and TLS-ALPN-01 would use 443);
-- whether the `--sysctl` and the `443:443` ports in this file still suffice, or a port 80
-  mapping is needed;
-- whether the server resolves names and makes outgoing connections, which a `read_only`
-  root and the resolver of the musl build must support;
-- the exact flags, their defaults and how `--cert`/`--key` combine with them;
-- how the cache directory's ownership works with a named volume and with a bind mount;
-- the `command:` of `deploy/compose.yaml` and the `docker run` line for the ACME case;
-- whether a staging run should come first (`--acme-staging`), to stay inside Let's Encrypt's
-  rate limits.
+None of this has been run against Let's Encrypt, in a container or outside one: see
+[Status](#status) and [deploy.md](deploy.md#what-the-tests-cover-and-what-they-do-not).
 
 ## Status
 
-Nothing that needs Docker has been run, because the machine the files were written on has no
-Docker. Until the `Docker` workflow has run once on GitHub:
+What the `Docker` workflow has run on GitHub for this image, on `linux/amd64` and `linux/arm64`
+(native runners): the build, including the static musl build of `aws-lc-sys`; that the image
+runs as a numeric non-root user; that the container starts with the hardened options above and
+answers `/api/clean` over HTTP/2 and HTTP/1.1 with `audit.score` and the `Alt-Svc` header; that it
+writes its log to the volume; and that it exits with code 0 on `docker stop`.
 
-- **Not run:** `docker build -f deploy/Dockerfile .` on either platform, in particular the
-  musl build of `aws-lc-sys` and the linking step.
-- **Not run:** the image itself: that it starts, binds 443 as UID 10001 with all capabilities
-  dropped, serves HTTP/1.1, HTTP/2 and HTTP/3, writes its log to `/data`, and exits with code 0
-  on `docker stop`.
-- **Not run:** `deploy/compose.yaml` (Docker Compose has not parsed it; only a YAML parser has).
-- **Not run:** the publish and merge jobs, the `gh attestation verify` command, the tags and
-  the `latest` rule. The package may be private after its first publish: check its visibility
-  in the GitHub package settings.
-- **Not tested:** HTTP/3 over the published UDP port. The workflow's runner has no HTTP/3
-  `curl`, so its smoke test covers TCP only (HTTP/2, HTTP/1.1 and the `Alt-Svc` header).
-- **Not measured:** the image size and the memory and process limits.
-- **Not verified:** the claim that `cap_add: NET_BIND_SERVICE` does not work for a non-root
-  user (see above); the sysctl route is read from Docker's source, not exercised here.
-- **Checked:** the workflow with `actionlint` 1.7.12 (which runs `shellcheck` on the shell
-  steps); the base image tags and digests, and that both are multi-platform for `amd64` and
-  `arm64`, through the registries' APIs; that the build context in `.dockerignore` is enough
-  for `cargo check --locked --bin mirrust`; and the pinned action versions and commit
-  hashes through the GitHub API.
+Not run:
 
-The first run of the workflow, on a pull request, is the real test of the image: expect to fix
-things it finds.
+- HTTP/3 in the container (the runner's curl has no HTTP/3), and a browser against it.
+- `--domain` in a container, against Let's Encrypt staging or production.
+- `deploy/compose.yaml`: Docker Compose has not parsed it, only a YAML parser has.
+- The publish and merge jobs, the `gh attestation verify` command, the tags and the `latest`
+  rule. The package may be private after its first publish: check its visibility in the GitHub
+  package settings.

@@ -107,8 +107,8 @@ Tested: `cargo test --workspace` (247 tests), clippy, `cargo fmt --all --check` 
 with Rust 1.88 in CI on Ubuntu and macOS, and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
 
-Run on a server: on Ubuntu 24.04 (x86_64, systemd 255), the release binary built by the
-`Linux build` workflow ran under the sandboxed unit of `deploy/mirrust.service`, adapted to
+Run on a server: on Ubuntu 24.04 (x86_64, systemd 255), the release binary built in CI
+on Ubuntu 24.04 ran under the sandboxed unit of `deploy/mirrust.service`, adapted to
 port 8443 and a self-signed certificate. It answered over HTTP/1.1, HTTP/2 (curl) and HTTP/3
 (Chrome), served 300 requests at 20 in parallel without an error, peaked at about 3.5 MB of
 memory, and stopped cleanly. See [deploy.md](deploy.md) for the details.
