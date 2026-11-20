@@ -9,6 +9,7 @@ use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, ChallengeType, Identifier, NewAccount,
     NewOrder, Order, OrderStatus, RetryPolicy,
 };
+use rustls::sign::CertifiedKey;
 
 use crate::acme::cache::{CertCache, CertificateAuthority, StoredCert};
 use crate::acme::cert::{CurrentCert, Validity, certified_key, validity_of};
@@ -109,8 +110,11 @@ impl Client {
                 return None;
             }
         };
-        match self.install(&stored) {
-            Ok(validity) if validity.contains(SystemTime::now()) => Some(validity),
+        match parse(&stored) {
+            Ok((key, validity)) if validity.contains(SystemTime::now()) => {
+                self.certs.set(Arc::new(key));
+                Some(validity)
+            }
             Ok(_) => None,
             Err(error) => {
                 eprintln!("acme: ignoring the cached certificate: {error:#}");
@@ -121,12 +125,7 @@ impl Client {
 
     /// Makes `stored` the certificate new handshakes get.
     fn install(&self, stored: &StoredCert) -> anyhow::Result<Validity> {
-        let key = certified_key(&stored.chain_pem, &stored.key_pem)?;
-        let validity = key
-            .cert
-            .first()
-            .and_then(|leaf| validity_of(leaf.as_ref()))
-            .context("reading the certificate's validity dates")?;
+        let (key, validity) = parse(stored)?;
         self.certs.set(Arc::new(key));
         Ok(validity)
     }
@@ -288,6 +287,17 @@ impl Client {
     }
 }
 
+/// The certificate in `stored`, ready to sign with, and its validity dates.
+fn parse(stored: &StoredCert) -> anyhow::Result<(CertifiedKey, Validity)> {
+    let key = certified_key(&stored.chain_pem, &stored.key_pem)?;
+    let validity = key
+        .cert
+        .first()
+        .and_then(|leaf| validity_of(leaf.as_ref()))
+        .context("reading the certificate's validity dates")?;
+    Ok((key, validity))
+}
+
 /// The CA's own words about why an order is invalid: the error of each failed challenge.
 async fn rejection(order: &mut Order) -> String {
     let mut problems: Vec<String> = Vec::new();
@@ -326,7 +336,7 @@ impl<'a> Armed<'a> {
         }
     }
 
-    fn insert(&mut self, name: &str, certificate: Arc<rustls::sign::CertifiedKey>) {
+    fn insert(&mut self, name: &str, certificate: Arc<CertifiedKey>) {
         self.challenges.insert(name, certificate);
         self.names.push(name.to_owned());
     }
@@ -432,5 +442,55 @@ mod tests {
         // The only observable effect is through a handshake, covered in `challenge`; here
         // the guard must at least run without a panic and leave nothing registered.
         assert!(challenges.is_empty());
+    }
+
+    /// A client whose cache holds a certificate for `a.example.com` valid in `years`.
+    fn client_with_cached(name: &str, years: (i32, i32)) -> (Client, std::path::PathBuf) {
+        use rcgen::{CertificateParams, KeyPair, date_time_ymd};
+
+        let base =
+            std::env::temp_dir().join(format!("mirrust-acme-order-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let authority = CertificateAuthority::LetsEncryptStaging;
+        let cache = CertCache::open(&base, authority).expect("open the cache");
+        let names = vec!["a.example.com".to_owned()];
+        let mut params = CertificateParams::new(names.clone()).expect("params");
+        params.not_before = date_time_ymd(years.0, 1, 1);
+        params.not_after = date_time_ymd(years.1, 1, 1);
+        let key = KeyPair::generate().expect("key");
+        let cert = params.self_signed(&key).expect("certificate");
+        let stored = StoredCert {
+            chain_pem: cert.pem(),
+            key_pem: key.serialize_pem(),
+        };
+        cache.save_certificate(&names, &stored).expect("save");
+        let client = Client {
+            settings: Settings {
+                names,
+                email: None,
+                authority,
+            },
+            cache,
+            certs: Arc::new(CurrentCert::new()),
+            challenges: AcmeChallenges::new(),
+        };
+        (client, base)
+    }
+
+    #[test]
+    fn a_valid_cached_certificate_is_installed_and_an_expired_one_is_not() {
+        let (valid, dir) = client_with_cached("valid", (2020, 2090));
+        let validity = valid.install_cached().expect("valid certificate is used");
+        assert!(validity.contains(SystemTime::now()));
+        assert!(valid.certs.is_set());
+        let _ = std::fs::remove_dir_all(dir);
+
+        let (expired, dir) = client_with_cached("expired", (2019, 2020));
+        assert!(expired.install_cached().is_none());
+        assert!(
+            !expired.certs.is_set(),
+            "an expired certificate must not be served"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

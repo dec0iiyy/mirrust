@@ -23,7 +23,8 @@ const USAGE: &str = "usage: mirrust [--listen ADDR] [--cert PEM --key PEM | --do
                   [--acme-dir DIR] [--acme-email ADDR] [--acme-staging]
                   [--cors-key KEY] [--log PATH] [--max-connections N]
 
-  --listen           address to listen on, TCP and UDP for HTTP/3 (default 127.0.0.1:8443)
+  --listen           address to listen on, TCP and UDP for HTTP/3 (default 127.0.0.1:8443,
+                     0.0.0.0:443 with --domain)
   --cert/--key       PEM certificate chain and private key; without them, and without
                      --domain, a self-signed certificate for localhost is generated
   --domain           get a Let's Encrypt certificate for this host name and renew it, with
@@ -48,6 +49,11 @@ const DEFAULT_ACME_DIR: &str = "./mirrust-acme";
 
 /// The port Let's Encrypt validates on, whatever the server listens on.
 const VALIDATION_PORT: u16 = 443;
+
+/// The default for `--listen`.
+const DEFAULT_LISTEN: &str = "127.0.0.1:8443";
+/// The default for `--listen` when `--domain` is given: the address Let's Encrypt can reach.
+const DEFAULT_LISTEN_ACME: &str = "0.0.0.0:443";
 
 /// What `--domain` and the `--acme-*` flags asked for, before the names are resolved.
 #[derive(Debug, PartialEq, Eq)]
@@ -76,7 +82,7 @@ enum Command {
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> {
-    let mut listen: SocketAddr = "127.0.0.1:8443".parse().expect("valid default address");
+    let mut listen: Option<SocketAddr> = None;
     let mut cert = None;
     let mut key = None;
     let mut log = None;
@@ -100,9 +106,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command>
             .with_context(|| format!("{flag} needs a value\n{USAGE}"))?;
         match flag.as_str() {
             "--listen" => {
-                listen = value
-                    .parse()
-                    .with_context(|| format!("bad --listen {value}"))?;
+                listen = Some(
+                    value
+                        .parse()
+                        .with_context(|| format!("bad --listen {value}"))?,
+                );
             }
             "--cert" => cert = Some(PathBuf::from(value)),
             "--key" => key = Some(PathBuf::from(value)),
@@ -149,6 +157,12 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command>
             staging: acme_staging,
         })
     };
+    let default_listen = if acme.is_some() {
+        DEFAULT_LISTEN_ACME
+    } else {
+        DEFAULT_LISTEN
+    };
+    let listen = listen.unwrap_or_else(|| default_listen.parse().expect("valid default address"));
     Ok(Command::Run(Box::new(Args {
         listen,
         cert,
@@ -369,6 +383,17 @@ mod tests {
             parse_args(["--help".to_owned()]).expect("help"),
             Command::Help
         ));
+    }
+
+    #[test]
+    fn the_default_listen_address_follows_domain() {
+        let plain = parse(&[]).expect("valid");
+        assert_eq!(plain.listen.to_string(), "127.0.0.1:8443");
+        let acme = parse(&["--domain", "mirror.example.com"]).expect("valid");
+        assert_eq!(acme.listen.to_string(), "0.0.0.0:443");
+        let explicit =
+            parse(&["--domain", "mirror.example.com", "--listen", "0.0.0.0:8444"]).expect("valid");
+        assert_eq!(explicit.listen.to_string(), "0.0.0.0:8444");
     }
 
     #[test]
