@@ -5,7 +5,7 @@ For the maintainer. A release is a tag: pushing `vX.Y.Z` runs
 for five targets, tests it, and publishes a GitHub Release that a user can download with one
 command. Nothing is built on your machine.
 
-**Status: the workflow has published two releases, v0.1.0 and v0.1.1** (see
+**Status: the workflow has published five releases, v0.1.0 to v0.1.4** (see
 [What has been exercised](#what-has-been-exercised) and
 [What has not been exercised](#what-has-not-been-exercised)). Do a dry run (below) after every
 change to the workflow, before tagging.
