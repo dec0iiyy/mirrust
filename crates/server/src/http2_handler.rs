@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::{
     Config,
     report::{Report, TlsDetails},
-    routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, header_value, route, wants_cors},
+    routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, date, header_value, route, wants_cors},
 };
 
 /// Answers one HTTP/2 request with the routed report.
@@ -25,7 +25,13 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
         alt_svc: config.alt_svc(),
         ..http2::Response::default()
     };
-    http2::serve(&mut stream, &RESPONSE_HEADERS, options, |request| {
+    // The same on every response of the connection, which has one (RFC 9110 section 6.6.1).
+    let date = date();
+    let extra_headers: Vec<(&str, &str)> = RESPONSE_HEADERS
+        .into_iter()
+        .chain([("Date", date.as_str())])
+        .collect();
+    http2::serve(&mut stream, &extra_headers, options, |request| {
         let allow_cors = wants_cors(
             request.headers().iter().map(String::as_str),
             &config.cors_key,

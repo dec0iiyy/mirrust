@@ -8,7 +8,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::Config;
 use crate::report::{Report, TlsDetails};
-use crate::routes::{OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, header_value, route, wants_cors};
+use crate::routes::{
+    OPTIONS_CONTENT_TYPE, RESPONSE_HEADERS, date, header_value, route, wants_cors,
+};
 
 /// The request is read into a 1024-byte buffer once and that buffer is parsed whole,
 /// zero padding included.
@@ -44,7 +46,8 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
         _ => "OK",
     };
     let mut head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nContent-Type: {content_type}; charset=utf-8\r\n",
+        "HTTP/1.1 {status} {reason}\r\nDate: {}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: {content_type}; charset=utf-8\r\n",
+        date(),
         body.len()
     );
     for (name, value) in RESPONSE_HEADERS {
@@ -63,9 +66,13 @@ pub(crate) async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     head.push_str("Server: mirrust\r\n\r\n");
 
     let mut response = head.into_bytes();
-    response.extend_from_slice(&body);
-    // tls.peet.ws writes two CRLFs past Content-Length; so do we, for comparability.
-    response.extend_from_slice(b"\r\n\r\n");
+    // A response to HEAD has the headers of the GET response, `Content-Length` included, and
+    // no content (RFC 9110 section 9.3.2).
+    if report.method != "HEAD" {
+        response.extend_from_slice(&body);
+        // tls.peet.ws writes two CRLFs past Content-Length; so do we, for comparability.
+        response.extend_from_slice(b"\r\n\r\n");
+    }
     stream.write_all(&response).await?;
     stream.shutdown().await
 }

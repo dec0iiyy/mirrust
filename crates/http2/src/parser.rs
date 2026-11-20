@@ -381,7 +381,8 @@ fn parse_frame(
             }
         }
         PING => {
-            if payload.len() != 8 || !stream_zero {
+            frame.ping_data = payload.try_into().ok();
+            if frame.ping_data.is_none() || !stream_zero {
                 return Err(Error::Frame("bad PING"));
             }
         }

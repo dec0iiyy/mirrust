@@ -1,6 +1,8 @@
 //! The request router: `/` as the page or the text report, `/text`, the JSON API under `/api/`,
 //! and a 404 page.
 
+use std::time::SystemTime;
+
 use crate::Config;
 use crate::printable::{MAX_PRINTED, printable};
 use crate::report::{Report, base64, hex, to_go_json, to_go_json_pretty};
@@ -17,6 +19,12 @@ pub(crate) const RESPONSE_HEADERS: [(&str, &str); 4] = [
     // HTTP/2 sends these headers from one fixed list and a cache must not mix the two up.
     ("Vary", "Accept"),
 ];
+
+/// The value of the `Date` header for a response sent now (RFC 9110 section 6.6.1: an origin
+/// server with a clock must send one). Not part of [`RESPONSE_HEADERS`], which is fixed.
+pub(crate) fn date() -> String {
+    httpdate::fmt_http_date(SystemTime::now())
+}
 
 /// Content type (before `; charset=utf-8`) of the empty answer to `OPTIONS`.
 pub(crate) const OPTIONS_CONTENT_TYPE: &str = "text/plain";

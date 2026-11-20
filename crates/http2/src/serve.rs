@@ -5,6 +5,7 @@ use std::{fmt, io, time::Duration};
 use loona_hpack::Encoder;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
+use crate::frame::ParsedFrame;
 use crate::parser::{self, Parser, Status};
 use crate::request::Http2Request;
 
@@ -108,9 +109,10 @@ where
 /// `stream` to tell HTTP/2 from HTTP/1.
 ///
 /// The exchange matches tls.peet.ws: once the preface is in, send SETTINGS (initial window
-/// 1048576, 100 streams, 65536 header list); read frames without acknowledging anything until
+/// 1048576, 100 streams, 65536 header list); read frames until
 /// the first one with `END_STREAM`; call `respond`, except for `OPTIONS`, which gets
-/// `options`; on the last HEADERS frame's stream send
+/// `options`; send a SETTINGS ACK for each SETTINGS frame and a PING ACK for each PING frame read,
+/// then on the last HEADERS frame's stream send
 /// HEADERS, the body in 1024-byte DATA frames, an empty DATA with `END_STREAM`, and GOAWAY;
 /// wait 500 ms and shut the stream down. If no HEADERS frame came, nothing is answered.
 ///
@@ -160,13 +162,14 @@ where
         // Go's Framer refuses to write HEADERS on stream 0 and tls.peet.ws gives up silently.
         return Ok(request);
     }
-    stream
-        .write_all(&response_frames(
-            request.stream_id,
-            &response,
-            extra_headers,
-        ))
-        .await?;
+    let mut answer = acknowledgements(&request.details.sent_frames);
+    answer.extend(response_frames(
+        request.stream_id,
+        &response,
+        extra_headers,
+        request.method == "HEAD",
+    ));
+    stream.write_all(&answer).await?;
     stream.flush().await?;
     tokio::time::sleep(CLOSE_DELAY).await;
     stream.shutdown().await?;
@@ -203,7 +206,32 @@ fn settings_frame() -> Vec<u8> {
     out
 }
 
-fn response_frames(stream_id: u32, response: &Response, extra_headers: &[(&str, &str)]) -> Vec<u8> {
+/// A SETTINGS ACK for every SETTINGS frame and a PING ACK for every PING frame the client sent
+/// (RFC 9113 sections 6.5.3 and 6.7); the exchange has no other use for them, so they go out
+/// together with the response instead of one by one as the frames arrive.
+fn acknowledgements(frames: &[ParsedFrame]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for frame in frames {
+        if frame.flags.contains(&"Ack (0x1)") {
+            continue;
+        }
+        match (frame.frame_type.as_str(), frame.ping_data) {
+            ("SETTINGS", _) => push_frame(&mut out, 0x4, 0x1, 0, &[]),
+            ("PING", Some(data)) => push_frame(&mut out, 0x6, 0x1, 0, &data),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// HEADERS, DATA and GOAWAY for `response`. A response to HEAD has no DATA frames, though its
+/// `content-length` is that of the body (RFC 9110 section 9.3.2, RFC 9113 section 8.1.1).
+fn response_frames(
+    stream_id: u32,
+    response: &Response,
+    extra_headers: &[(&str, &str)],
+    head: bool,
+) -> Vec<u8> {
     let length = response.body.len().to_string();
     let status = response.status.to_string();
     let extra_names: Vec<String> = extra_headers
@@ -235,11 +263,16 @@ fn response_frames(stream_id: u32, response: &Response, extra_headers: &[(&str, 
     let block = Encoder::new().encode(fields);
 
     let mut out = Vec::with_capacity(block.len() + response.body.len() + 64);
-    push_frame(&mut out, 0x1, 0x4, stream_id, &block);
-    for chunk in response.body.chunks(DATA_CHUNK) {
-        push_frame(&mut out, 0x0, 0, stream_id, chunk);
+    if head {
+        // END_HEADERS | END_STREAM
+        push_frame(&mut out, 0x1, 0x5, stream_id, &block);
+    } else {
+        push_frame(&mut out, 0x1, 0x4, stream_id, &block);
+        for chunk in response.body.chunks(DATA_CHUNK) {
+            push_frame(&mut out, 0x0, 0, stream_id, chunk);
+        }
+        push_frame(&mut out, 0x0, 0x1, stream_id, &[]);
     }
-    push_frame(&mut out, 0x0, 0x1, stream_id, &[]);
     let mut goaway = [0; 8];
     goaway[..4].copy_from_slice(&stream_id.to_be_bytes());
     push_frame(&mut out, 0x7, 0, 0, &goaway);

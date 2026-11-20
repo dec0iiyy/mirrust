@@ -41,6 +41,9 @@ pub struct ParsedFrame {
     /// Contents of a GOAWAY frame.
     #[serde(rename = "goaway", skip_serializing_if = "Option::is_none")]
     pub go_away: Option<GoAway>,
+    /// The opaque data of a PING frame, which the PING ACK echoes. Not part of the report.
+    #[serde(skip)]
+    pub ping_data: Option<[u8; 8]>,
 }
 
 /// Stream priority (RFC 9113 section 5.3, deprecated but still sent by some clients).

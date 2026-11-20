@@ -220,8 +220,13 @@ fn serve(runtime: &Runtime, request: &[u8], tls: TlsDetails) -> Result<(), TestC
     let length = lines
         .find_map(|line| line.strip_prefix("Content-Length: "))
         .and_then(|value| value.parse::<usize>().ok());
-    // Two CRLFs follow the body, past Content-Length.
-    prop_assert_eq!(length.map(|length| length + 4), Some(body.len()));
+    // A HEAD request gets no content; a malformed request line that starts with HEAD is not one.
+    if request.starts_with(b"HEAD ") && body.is_empty() {
+        prop_assert!(length.is_some(), "HEAD keeps Content-Length");
+    } else {
+        // Two CRLFs follow the body, past Content-Length.
+        prop_assert_eq!(length.map(|length| length + 4), Some(body.len()));
+    }
     // Nothing the client sent reaches the response head.
     prop_assert!(head.len() < 512, "response head of {} bytes", head.len());
     Ok(())

@@ -19,6 +19,7 @@ fingerprint = { path = "../fingerprint" }
 h3.workspace = true
 h3-quinn.workspace = true
 http.workspace = true
+httpdate.workspace = true
 http2 = { path = "../http2" }
 http3 = { path = "../http3" }
 instant-acme.workspace = true

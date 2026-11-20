@@ -74,6 +74,8 @@ fn get_with_status(
     let alt_svc = format!("\r\nAlt-Svc: h3=\":{}\"; ma=86400\r\n", addr.port());
     assert!(head.contains(&alt_svc), "{head}");
     for header in [
+        // The server closes after every response and must say so (RFC 9112 section 9.3).
+        "Connection: close",
         "Cache-Control: no-store",
         "X-Content-Type-Options: nosniff",
         "Referrer-Policy: no-referrer",
@@ -81,6 +83,15 @@ fn get_with_status(
     ] {
         assert!(head.contains(&format!("\r\n{header}\r\n")), "{head}");
     }
+    let date = head
+        .lines()
+        .find_map(|line| line.strip_prefix("Date: "))
+        .expect("Date, which an origin server with a clock must send (RFC 9110 section 6.6.1)");
+    let sent = httpdate::parse_http_date(date).expect("an IMF-fixdate");
+    let age = std::time::SystemTime::now()
+        .duration_since(sent)
+        .unwrap_or_default();
+    assert!(age < std::time::Duration::from_secs(60), "{date}");
     let length: usize = head
         .lines()
         .find_map(|line| line.strip_prefix("Content-Length: "))
@@ -93,6 +104,27 @@ fn get_with_status(
         "two CRLFs follow the body, as on tls.peet.ws"
     );
     (hello, body[..length].to_owned())
+}
+
+#[test]
+fn head_gets_the_headers_and_no_content_over_http1() {
+    let (_runtime, addr, roots) = start();
+    let mut config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    let name = ServerName::try_from("localhost").expect("valid name");
+    let conn = ClientConnection::new(Arc::new(config), name).expect("client connection");
+    let mut tls = StreamOwned::new(conn, TcpStream::connect(addr).expect("connect"));
+    tls.write_all(b"HEAD /api/all HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .expect("send request");
+    let mut response = Vec::new();
+    let _ = tls.read_to_end(&mut response);
+    let response = String::from_utf8(response).expect("UTF-8 response");
+    let (head, content) = response.split_once("\r\n\r\n").expect("header block");
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    assert!(head.contains("\r\nContent-Length: "), "{head}");
+    assert_eq!(content, "", "RFC 9110 section 9.3.2: no content for HEAD");
 }
 
 #[test]
