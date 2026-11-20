@@ -175,6 +175,11 @@ pub(crate) fn tls_traits(input: &Input<'_>) -> Option<Check> {
     }
     let agent = input.agent?;
     let engine = engine(agent)?;
+    // Only Apple's TLS stack is known to send GREASE. WebKitGTK (GnuTLS or OpenSSL) and the old
+    // Android browser also say `Safari/` and send none.
+    if engine == Engine::WebKit && user_agent_os(input.user_agent) != Some(Os::Darwin) {
+        return None;
+    }
     let family = agent.family.name();
     let hello = input.hello;
     let grease = hello.cipher_suites.iter().any(|&c| is_grease(c));
@@ -429,8 +434,15 @@ pub(crate) fn http2(input: &Input<'_>) -> Option<Check> {
 pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
     const ID: &str = "headers";
     const TITLE: &str = "Request headers of the claimed browser";
-    /// Safari sends `Sec-Fetch-*` from this major version on.
-    const SAFARI_SEC_FETCH_FROM: u32 = 17;
+    /// First major versions that send `Sec-Fetch-*`: Chrome 76, Firefox 90 and Safari 17 (Safari
+    /// 16.4 already does; 17 keeps clear of the boundary). Older browsers are not penalised.
+    const SEC_FETCH_FROM: [(Engine, u32); 3] = [
+        (Engine::Chromium, 76),
+        (Engine::Gecko, 90),
+        (Engine::WebKit, 17),
+    ];
+    /// First Chromium major version that sends `Sec-CH-UA`.
+    const SEC_CH_UA_FROM: u32 = 89;
     let (lines, agent) = (input.headers?, input.agent?);
     let engine = engine(agent)?;
     let family = agent.family.name();
@@ -441,18 +453,24 @@ pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
                 .is_some_and(|start| start.eq_ignore_ascii_case(name.as_bytes()))
         })
     };
-    let sends_sec_fetch = match engine {
-        Engine::Chromium | Engine::Gecko => true,
-        Engine::WebKit => agent
-            .major
-            .is_some_and(|major| major >= SAFARI_SEC_FETCH_FROM),
+    // A User-Agent without a version counts as current, except for WebKit: iOS browsers that
+    // are not Safari state none.
+    let since = |from: u32| match engine {
+        Engine::WebKit => agent.major.is_some_and(|major| major >= from),
+        Engine::Chromium | Engine::Gecko => agent.major.is_none_or(|major| major >= from),
     };
+    let sends_sec_fetch = SEC_FETCH_FROM
+        .iter()
+        .any(|&(kind, from)| kind == engine && since(from));
+    let sends_sec_ch_ua = engine == Engine::Chromium && since(SEC_CH_UA_FROM);
 
     let mut missing: Vec<&str> = Vec::new();
     let mut penalty: u8 = 0;
-    if engine == Engine::Chromium && !has("sec-ch-ua:") {
+    // Chromium leaves `Sec-CH-UA` out when JavaScript is blocked for the site or the
+    // User-Agent was overridden without client hints, so a real browser can lack it: a warning.
+    if sends_sec_ch_ua && !has("sec-ch-ua:") {
         missing.push("sec-ch-ua");
-        penalty += 20;
+        penalty += 10;
     }
     if sends_sec_fetch && !has("sec-fetch-") {
         missing.push("sec-fetch-*");
@@ -738,6 +756,59 @@ mod tests {
         let found = tls_traits(&Input::new(&hello, CHROME_UA)).expect("applies");
         assert_eq!(found.status, Status::Pass);
         assert!(tls_traits(&Input::new(&hello, "curl/8.7.1")).is_none());
+    }
+
+    #[test]
+    fn safari_traits_apply_to_apple_platforms_only() {
+        const IPHONE: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) \
+            AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+        // WebKitGTK and WPE claim `Version/60.5`, and their TLS comes from GnuTLS or OpenSSL.
+        const WEBKIT_GTK: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 \
+            (KHTML, like Gecko) Version/60.5 Safari/605.1.15";
+        let mut bare = ClientHello::default();
+        bare.cipher_suites = vec![0x1301, 0xc02f];
+        bare.alpn = vec![b"h2".to_vec()];
+        let found = tls_traits(&Input::new(&bare, IPHONE)).expect("applies");
+        assert_eq!(found.status, Status::Fail);
+        assert!(found.detail.contains("no GREASE"), "{}", found.detail);
+        assert!(tls_traits(&Input::new(&bare, WEBKIT_GTK)).is_none());
+    }
+
+    #[test]
+    fn headers_that_a_real_chromium_can_lack_do_not_fail_it() {
+        let headers = [
+            "accept-encoding: gzip".to_owned(),
+            "accept-language: en".to_owned(),
+            "sec-fetch-mode: navigate".to_owned(),
+        ];
+        let hello = chrome_like();
+        let mut input = Input::new(&hello, CHROME_UA);
+        input.headers = Some(&headers);
+        // JavaScript blocked for the site, or a custom User-Agent: no Sec-CH-UA.
+        let found = self::headers(&input).expect("applies");
+        assert_eq!(found.status, Status::Warn, "{}", found.detail);
+        assert_eq!(found.penalty, 10);
+
+        // Chrome 85 predates Sec-CH-UA, Firefox 80 predates Sec-Fetch-*.
+        let old_chrome = CHROME_UA.replace("Chrome/160", "Chrome/85");
+        let bare = [
+            "accept-encoding: gzip".to_owned(),
+            "accept-language: en".to_owned(),
+        ];
+        let mut input = Input::new(&hello, &old_chrome);
+        input.headers = Some(&bare);
+        let found = self::headers(&input).expect("applies");
+        assert_eq!(found.status, Status::Fail, "{}", found.detail);
+        assert!(found.detail.ends_with("sec-fetch-*"), "{}", found.detail);
+
+        let firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:80.0) Gecko/20100101 Firefox/80.0";
+        let mut input = Input::new(&hello, firefox);
+        input.headers = Some(&bare);
+        assert_eq!(self::headers(&input).expect("applies").status, Status::Pass);
+        let firefox = firefox.replace("80.0", "133.0");
+        let mut input = Input::new(&hello, &firefox);
+        input.headers = Some(&bare);
+        assert_eq!(self::headers(&input).expect("applies").status, Status::Fail);
     }
 
     #[test]

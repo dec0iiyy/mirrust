@@ -694,12 +694,12 @@ they are reported:
 | --- | --- | --- |
 | `tls_known` | The JA4 with the known-client dataset. A hello whose cipher and extension hashes equal an entry's, differing only in the first JA4 part (SNI, ALPN), counts as that client. | 5 for a cipher-list match only, 10 for no match |
 | `ua_tls` | The family the `User-Agent` names with the family of the matched client. Also reports a missing `User-Agent`. | 40; 25 when only the cipher list matched; 10 for no `User-Agent` |
-| `tls_traits` | Only without a dataset match and with a browser `User-Agent`: the extensions that engine always sends (Chromium: GREASE, `compress_certificate`, `application_settings` when `h2` is offered, no `record_size_limit`; Firefox: no GREASE, `record_size_limit`, `delegated_credentials`, no `application_settings`; Safari: GREASE, no `application_settings`). | 30 |
+| `tls_traits` | Only without a dataset match and with a browser `User-Agent`: the extensions that engine always sends (Chromium: GREASE, `compress_certificate`, `application_settings` when `h2` is offered, no `record_size_limit`; Firefox: no GREASE, `record_size_limit`, `delegated_credentials`, no `application_settings`; Safari on an Apple platform: GREASE, no `application_settings`; WebKitGTK also says Safari and is not checked). | 30 |
 | `ua_version` | The major version in the `User-Agent` with the first version of the matched entry. | 10 when the `User-Agent` is older |
 | `alps_alpn` | Every protocol named in `application_settings` (17513 or 17613) must also be in ALPN. | 30 |
 | `grease` | A hello that uses GREASE has it in cipher suites, extensions, groups and versions alike. | 20 |
 | `http2` | The Akamai fingerprint with the one recorded for the matched client; without one, the pseudo-header order with the claimed engine's (Chromium `m,a,s,p`, Firefox `m,p,a,s`). | 30 |
-| `headers` | Only with a browser `User-Agent` and when the server saw the headers (HTTP/1.1, HTTP/2): `sec-ch-ua` (Chromium), `sec-fetch-*` (Chromium, Firefox, Safari from 17), `accept-language`, `accept-encoding`. | 20, 20, 10, 10; at most 30 |
+| `headers` | Only with a browser `User-Agent` and when the server saw the headers (HTTP/1.1, HTTP/2): `sec-ch-ua` (Chromium from 89; Chromium leaves it out when JavaScript is blocked for the site or the `User-Agent` was overridden, so it counts less), `sec-fetch-*` (Chromium from 76, Firefox from 90, Safari from 17), `accept-language`, `accept-encoding`. | 10, 20, 10, 10; at most 30 |
 | `tcp_os` | The system whose default SYN has these TCP options with the system the `User-Agent` names. `skip`, with no penalty, while the server does not capture the SYN, which is always for now. | 30 |
 | `tcp_mss` | The MSS with the Ethernet value (1460, or 1440 over IPv6), allowing 8 bytes for `PPPoE`. Left out while there is no SYN. | 10 when more than 8 lower |
 
