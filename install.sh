@@ -180,7 +180,7 @@ check_attestation() {
 can_write() {
     dir=$1
     while [ ! -d "$dir" ]; do
-        parent=$(dirname "$dir")
+        parent=$(dirname -- "$dir")
         if [ "$parent" = "$dir" ]; then
             return 1
         fi
@@ -216,12 +216,19 @@ choose_destination() {
 # Installs $tmp/$asset as $dest_dir/mirrust, mode 0755.
 install_binary() {
     # Each command returns on failure: the caller runs this in a `||`, where `set -e` is off.
+    # `install -d -m` also changes the mode of a directory that already exists (BSD install does,
+    # and so does GNU install), so a directory is only created when it is missing. `--` keeps a
+    # --prefix that starts with a hyphen from being read as an option.
     if [ "$use_sudo" = yes ]; then
-        sudo install -d -m 0755 "$dest_dir" || return 1
-        sudo install -m 0755 "$tmp/$asset" "$dest_dir/mirrust" || return 1
+        if [ ! -d "$dest_dir" ]; then
+            sudo install -d -m 0755 -- "$dest_dir" || return 1
+        fi
+        sudo install -m 0755 -- "$tmp/$asset" "$dest_dir/mirrust" || return 1
     else
-        install -d -m 0755 "$dest_dir" || return 1
-        install -m 0755 "$tmp/$asset" "$dest_dir/mirrust" || return 1
+        if [ ! -d "$dest_dir" ]; then
+            install -d -m 0755 -- "$dest_dir" || return 1
+        fi
+        install -m 0755 -- "$tmp/$asset" "$dest_dir/mirrust" || return 1
     fi
 }
 

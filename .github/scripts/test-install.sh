@@ -215,6 +215,21 @@ printf 'junk' >"$work/bin1/mirrust"
 run_install MIRRUST_BASE_URL="$base/release" -- --prefix "$work/bin1"
 check "installing again replaces the file" sh -c "'$work/bin1/mirrust' --help | grep -q 'fake binary'"
 
+# An existing prefix keeps its mode: `install -d -m 0755` would widen a 0700 directory.
+mkdir -m 700 "$work/private-bin"
+run_install MIRRUST_BASE_URL="$base/release" -- --prefix "$work/private-bin"
+# shellcheck disable=SC2012 # the mode string of one known directory
+dir_mode=$(ls -ld "$work/private-bin" | cut -c1-10)
+check "an existing prefix directory keeps its mode" test "$status" -eq 0 -a \
+    "$dir_mode" = "drwx------" -a -x "$work/private-bin/mirrust"
+
+# A prefix that starts with a hyphen is a path, not an option of install or dirname.
+mkdir "$work/cwd"
+cd "$work/cwd" || exit 2
+run_install MIRRUST_BASE_URL="$base/release" -- --prefix -dash-bin/sub
+cd "$here" || exit 2
+check "a prefix that starts with a hyphen works" test "$status" -eq 0 -a -x "$work/cwd/-dash-bin/sub/mirrust"
+
 # --- failures that must install nothing ---
 
 run_install MIRRUST_BASE_URL="$base/tampered" -- --prefix "$work/bin5"
