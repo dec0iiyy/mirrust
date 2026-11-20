@@ -1,6 +1,6 @@
 name: Release
 
-# Builds mirrust for four targets and, for a version tag, publishes a GitHub Release with the
+# Builds mirrust for five targets and, for a version tag, publishes a GitHub Release with the
 # binaries, their archives and a SHA256SUMS file. Maintainer guide: docs/releasing.md.
 #
 #   - Push a tag `vX.Y.Z` that equals the version of the `server` package: builds,
@@ -89,6 +89,10 @@ jobs:
     needs: meta
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    # The run steps are bash everywhere, which on the Windows runner is Git for Windows' bash.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -112,6 +116,12 @@ jobs:
             runner: macos-latest
             asset: mirrust-macos-x86_64
             linux: false
+          # Windows is for local testing: no systemd, and no TCP SYN capture there.
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            asset: mirrust-windows-x86_64.exe
+            linux: false
+            windows: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,6 +149,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
           musl-gcc -dumpmachine
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
+      # aws-lc-sys wants NASM on Windows x86-64. The variable makes it use the object files
+      # that the crate ships prebuilt, so NASM is not installed.
+      - name: Use the prebuilt NASM objects of aws-lc-sys
+        if: matrix.windows
+        run: echo "AWS_LC_SYS_PREBUILT_NASM=1" >> "$GITHUB_ENV"
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
@@ -170,14 +185,22 @@ jobs:
         run: .github/scripts/smoke-test-linux.sh "target/$TARGET/release/mirrust" debian:12-slim alpine:3
       # macOS: on the runner. The x86_64 binary runs there under Rosetta 2.
       - name: Smoke test on the runner
-        if: ${{ !matrix.linux }}
+        if: ${{ !matrix.linux && !matrix.windows }}
         env:
           TARGET: ${{ matrix.target }}
         run: .github/scripts/smoke-test.sh "target/$TARGET/release/mirrust"
+      # Windows: on the runner, in PowerShell; curl.exe ships with the runner image.
+      - name: Smoke test on the Windows runner
+        if: matrix.windows
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: ./.github/scripts/smoke-test.ps1 -Binary "target/$env:TARGET/release/mirrust.exe"
       # mirrust-<tag>-<target>.tar.gz holds the binary, the licence files, the README and the
       # systemd unit; the bare binary is copied next to it under its short name. Written for
       # GNU tar (Linux) and bsdtar (macOS): both take the same flags below except the owner.
       - name: Package
+        if: ${{ !matrix.windows }}
         env:
           TARGET: ${{ matrix.target }}
           ASSET: ${{ matrix.asset }}
@@ -202,6 +225,26 @@ jobs:
           chmod 755 "dist/$ASSET"
           tar -tzvf "dist/$name.tar.gz"
           ls -l dist
+      # Windows: mirrust-<tag>-<target>.zip with mirrust.exe, LICENSE, NOTICE and README.md,
+      # without the systemd unit, and the bare mirrust-windows-x86_64.exe. 7-Zip is on the
+      # runner image.
+      - name: Package (Windows)
+        if: matrix.windows
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          name="mirrust-$TAG-$TARGET"
+          bin="target/$TARGET/release/mirrust.exe"
+          mkdir -p "dist/$name"
+          cp "$bin" LICENSE NOTICE README.md "dist/$name/"
+          (cd dist && 7z a -tzip "$name.zip" "$name")
+          rm -r "dist/$name"
+          cp "$bin" "dist/$ASSET"
+          7z l "dist/$name.zip"
+          ls -l dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-${{ matrix.target }}
@@ -225,8 +268,8 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          # Four targets, two files each; fewer means a build job lost its files.
-          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 8
+          # Five targets, two files each; fewer means a build job lost its files.
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 10
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
           sha256sum --check SHA256SUMS
@@ -285,7 +328,7 @@ jobs:
           $ gh attestation verify mirrust-linux-x86_64 --repo $GH_REPO
           \`\`\`
 
-          The bare binaries need \`chmod +x\` after the download. The \`.tar.gz\` archives hold the binary, \`LICENSE\`, \`NOTICE\`, \`README.md\` and \`deploy/mirrust.service\`.
+          The bare binaries need \`chmod +x\` after the download. The \`.tar.gz\` archives hold the binary, \`LICENSE\`, \`NOTICE\`, \`README.md\` and \`deploy/mirrust.service\`; the Windows \`.zip\` holds \`mirrust.exe\`, \`LICENSE\`, \`NOTICE\` and \`README.md\`. The Windows build is for local testing.
           EOF
           gh release create "$TAG" --verify-tag --generate-notes --notes-file notes.md \
             --prerelease="$prerelease" dist/*
