@@ -90,7 +90,18 @@ Follows FoxIO's `technical_details/JA4.md` and its reference implementations. In
 | version | Highest non-GREASE entry of `supported_versions` (ext 43); without that extension, `legacy_version`. `0x0304` → `13`, `0x0303` → `12`, `0x0302` → `11`, `0x0301` → `10`, `0x0300` → `s3`, `0x0002` → `s2`, `0xFEFF` → `d1`, `0xFEFD` → `d2`, `0xFEFC` → `d3`, anything else (including an empty ext 43) → `00`. |
 | SNI | `d` when ext 0 is present, else `i`. |
 | counts | Non-GREASE cipher suites, then non-GREASE extensions (SNI and ALPN included), each two digits, capped at `99`. |
-| ALPN | From the first ALPN name: its first and last byte when both are ASCII letters or digits; otherwise the high nibble of the first byte and the low nibble of the last byte, in hex. `00` with no ALPN or an empty first name. |
+| ALPN | From the first ALPN name: its first and last byte when both are ASCII letters or digits; otherwise the high nibble of the first byte and the low nibble of the last byte, in hex. `00` with no ALPN or an empty first name. A GREASE name (RFC 8701: `0x0A 0x0A` to `0xFA 0xFA`) is not skipped, so it gives `0a` to `fa`. |
+
+The specification says to "ignore GREASE values anywhere", and a GREASE ALPN name is the one
+place where mirrust does not, on purpose. FoxIO's own implementations remove GREASE from
+cipher suites, extensions, versions and signature algorithms and leave ALPN alone: the
+Wireshark plugin (`wireshark/source/packet-ja4.c`) tests `IS_GREASE_TLS` for those lists and
+takes the first `tls.handshake.extensions_alpn_str` as it is, and the Zeek script
+(`zeek/scripts/fingerprints/ja4/helpers.zeek`) keeps every ALPN string where its other lists
+are commented "GREASE removed". Both were read on 2026-11-20; the repository no longer has
+its Rust and Python implementations. A value that differs from what those tools print for the
+same ClientHello would be of no use, so mirrust follows them. No client in the corpus sends a
+GREASE ALPN name.
 
 **Part b**: the cipher suites, sorted, 4-digit hex, joined with `,`.
 

@@ -198,6 +198,13 @@ fn u16_values(data: &[u8]) -> impl Iterator<Item = u16> {
 }
 
 /// First and last character of the first ALPN value; `00` when there is none.
+///
+/// The first value is taken as it is, also when it is a GREASE name (RFC 8701 reserves the
+/// two-byte names `0x0A 0x0A` to `0xFA 0xFA`), which then gives `0a` to `fa`. The
+/// specification says to ignore GREASE values anywhere, and FoxIO's own implementations do
+/// that for cipher suites, extensions, versions and signature algorithms but not for ALPN:
+/// the Wireshark plugin takes the first `tls.handshake.extensions_alpn_str`, and the Zeek
+/// script keeps every ALPN string. A client fingerprinted there and here must get one value.
 fn alpn(hello: &ClientHello) -> String {
     let first = find(hello, ALPN).and_then(|extension| {
         let (&len, rest) = extension.data.get(2..)?.split_first()?;
@@ -327,5 +334,26 @@ mod tests {
             assert_eq!(alpn_ends(value), expected, "ALPN {value:02x?}");
         }
         assert_eq!(alpn_ends(&[0x30, 0xab, 0xcd, 0x31]), "01");
+    }
+
+    #[test]
+    fn a_grease_alpn_name_is_the_first_value_like_any_other() {
+        // The ALPN list of the example with a GREASE name put first: 0x0A 0x0A, then h2.
+        let mut hello = spec_example();
+        let alpn_extension = hello
+            .extensions
+            .iter_mut()
+            .find(|extension| extension.kind == ALPN)
+            .expect("the example has ALPN");
+        alpn_extension.data = b"\x00\x06\x02\x0a\x0a\x02h2".to_vec();
+        // FoxIO's Wireshark plugin and Zeek script do not drop it, so neither does this:
+        // `0a`, the outer hex digits of the name, not the `h2` behind it.
+        assert_eq!(alpn(&hello), "0a");
+        assert!(
+            Ja4::new(&hello, Transport::Tcp)
+                .hashed()
+                .starts_with("t13d15160a_")
+        );
+        assert_eq!(alpn_ends(&[0xfa, 0xfa]), "fa");
     }
 }
