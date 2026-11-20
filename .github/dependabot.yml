@@ -12,3 +12,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The two base images of deploy/Dockerfile, each pinned by tag and digest. Without this entry
+  # the pins never move. The Docker workflow builds and smoke-tests the pull request.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly

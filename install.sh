@@ -123,7 +123,17 @@ pick_downloader() {
 # fetch URL FILE
 fetch() {
     if [ "$downloader" = curl ]; then
-        curl --fail --silent --show-error --location --retry 2 --output "$2" "$1"
+        # Redirects are followed to https only (curl would follow one to plain http), and an
+        # https URL is fetched over TLS 1.2 or newer, as rustup-init does. The URL is http
+        # only for the tests' local server. A connection that stalls is given up after 30 s
+        # without data below 1 kB/s; there is no limit on the total time, for slow links.
+        case "$1" in
+            https://*) proto='--proto =https --tlsv1.2' ;;
+            *) proto= ;;
+        esac
+        # shellcheck disable=SC2086 # $proto is a list of options on purpose
+        curl --fail --silent --show-error --location --retry 2 $proto --proto-redir =https \
+            --connect-timeout 30 --speed-limit 1000 --speed-time 30 --output "$2" "$1"
     else
         wget --quiet --output-document="$2" "$1"
     fi
@@ -142,7 +152,10 @@ sha256_of() {
 
 # Stops unless $tmp/$asset is the file that $tmp/SHA256SUMS lists under that name.
 verify_checksum() {
-    expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$tmp/SHA256SUMS")
+    # Lowercase, as sha256_of prints it: the check below accepts upper-case hex digits, and a
+    # SHA256SUMS written with them must not be reported as a mismatch.
+    expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1 }' "$tmp/SHA256SUMS" |
+        tr 'A-F' 'a-f')
     case "$expected" in
         "") die "SHA256SUMS has no entry for $asset; nothing was installed" ;;
         *[!0-9a-fA-F]* | *"
@@ -180,7 +193,7 @@ check_attestation() {
 can_write() {
     dir=$1
     while [ ! -d "$dir" ]; do
-        parent=$(dirname "$dir")
+        parent=$(dirname -- "$dir")
         if [ "$parent" = "$dir" ]; then
             return 1
         fi
@@ -216,12 +229,19 @@ choose_destination() {
 # Installs $tmp/$asset as $dest_dir/mirrust, mode 0755.
 install_binary() {
     # Each command returns on failure: the caller runs this in a `||`, where `set -e` is off.
+    # `install -d -m` also changes the mode of a directory that already exists (BSD install does,
+    # and so does GNU install), so a directory is only created when it is missing. `--` keeps a
+    # --prefix that starts with a hyphen from being read as an option.
     if [ "$use_sudo" = yes ]; then
-        sudo install -d -m 0755 "$dest_dir" || return 1
-        sudo install -m 0755 "$tmp/$asset" "$dest_dir/mirrust" || return 1
+        if [ ! -d "$dest_dir" ]; then
+            sudo install -d -m 0755 -- "$dest_dir" || return 1
+        fi
+        sudo install -m 0755 -- "$tmp/$asset" "$dest_dir/mirrust" || return 1
     else
-        install -d -m 0755 "$dest_dir" || return 1
-        install -m 0755 "$tmp/$asset" "$dest_dir/mirrust" || return 1
+        if [ ! -d "$dest_dir" ]; then
+            install -d -m 0755 -- "$dest_dir" || return 1
+        fi
+        install -m 0755 -- "$tmp/$asset" "$dest_dir/mirrust" || return 1
     fi
 }
 

@@ -50,8 +50,8 @@ $ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/instal
 $ sudo mirrust install --domain mirror.example.com
 ```
 
-`install.sh` is a release file of the first release after 0.1.0, and is in the repository's
-root before that. It detects the system with `uname`, downloads the binary and `SHA256SUMS`
+`install.sh` is a release file from 0.1.1 on (0.1.0 does not have it), and is in the
+repository's root. It detects the system with `uname`, downloads the binary and `SHA256SUMS`
 with curl (or wget) into a temporary directory, checks the SHA-256 before it installs
 anything, runs `gh attestation verify` as well when `gh` is installed (and only reports the
 result), and installs `/usr/local/bin/mirrust` with mode 0755. If that directory is not
@@ -83,9 +83,11 @@ init system) and when it is not run as root. Then, in this order:
 3. Runs `systemctl daemon-reload`, `systemctl enable mirrust.service` and `systemctl restart
    mirrust.service`. The restart starts a stopped service and restarts a running one, which is
    what makes running the command again apply new flags.
-4. Waits up to 5 seconds for `systemctl is-active mirrust.service` to say `active`, prints the
-   state, `journalctl -u mirrust -f` for the log, and the ports to open (TCP 443 and UDP 443).
-   If the service is not active by then, it says so and exits with an error; the reason is in
+4. Waits up to 5 seconds for `systemctl is-active mirrust.service` to say `active`, waits 2
+   more seconds and asks again (a server that cannot bind port 443, because nginx or Apache
+   already holds it, is `active` for a few milliseconds before it exits), prints the state,
+   `journalctl -u mirrust -f` for the log, and the ports to open (TCP 443 and UDP 443). If the
+   service is not active by then, it says so and exits with an error; the reason is in
    `systemctl status mirrust.service` and the journal.
 
 It makes no network connection itself; the certificate order starts when the service does.

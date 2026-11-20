@@ -71,6 +71,11 @@ const TEMPLATE: &str = include_str!("../../../deploy/mirrust.service");
 const START_WAIT: Duration = Duration::from_secs(5);
 /// How often it asks while waiting.
 const START_POLL: Duration = Duration::from_millis(500);
+/// How long a service that reported `active` must stay `active` before `install` believes it.
+/// The unit has `Type=exec`, so it is `active` as soon as the program has been executed, a few
+/// milliseconds before a server that cannot bind port 443 exits. After that exit the unit is
+/// `activating` for the unit's `RestartSec=` (5 seconds), which is longer than this.
+const START_SETTLE: Duration = Duration::from_secs(2);
 
 /// What `install` or `uninstall` was asked to do.
 #[derive(Debug)]
@@ -737,22 +742,37 @@ fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// Asks `systemctl is-active` until it says `active` or [`START_WAIT`] has passed, and returns
-/// the last answer.
+/// Asks `systemctl is-active` for the state of the service.
+fn unit_state() -> String {
+    Command::new("systemctl")
+        .args(["is-active", UNIT_NAME])
+        .output()
+        .map_or_else(
+            |error| format!("unknown ({error})"),
+            |output| String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        )
+}
+
+/// Waits for the service to be running and returns its state.
 fn wait_until_active() -> String {
+    wait_for_start(unit_state, thread::sleep)
+}
+
+/// Asks `state` until it says `active` or [`START_WAIT`] has passed. An `active` answer is
+/// asked again after [`START_SETTLE`], because a service that exits at once is `active` for a
+/// moment first; the second answer is the result. `pause` sleeps.
+fn wait_for_start(mut state: impl FnMut() -> String, mut pause: impl FnMut(Duration)) -> String {
     let mut waited = Duration::ZERO;
     loop {
-        let state = Command::new("systemctl")
-            .args(["is-active", UNIT_NAME])
-            .output()
-            .map_or_else(
-                |error| format!("unknown ({error})"),
-                |output| String::from_utf8_lossy(&output.stdout).trim().to_owned(),
-            );
-        if state == "active" || waited >= START_WAIT {
-            return state;
+        let now = state();
+        if now == "active" {
+            pause(START_SETTLE);
+            return state();
         }
-        thread::sleep(START_POLL);
+        if waited >= START_WAIT {
+            return now;
+        }
+        pause(START_POLL);
         waited += START_POLL;
     }
 }
@@ -1175,6 +1195,43 @@ mod tests {
                 "run: systemctl daemon-reload",
             ]
         );
+    }
+
+    #[test]
+    fn a_service_that_exits_right_after_it_started_is_not_active() {
+        // Type=exec: `active` for a moment, then `activating` while systemd waits to restart it.
+        let mut answers = ["active", "activating"].into_iter();
+        let mut pauses = Vec::new();
+        let state = wait_for_start(
+            || answers.next().expect("asked twice").to_owned(),
+            |pause| pauses.push(pause),
+        );
+        assert_eq!(state, "activating");
+        assert_eq!(pauses, [START_SETTLE]);
+    }
+
+    #[test]
+    fn a_service_that_stays_up_is_active() {
+        let mut answers = ["activating", "active", "active"].into_iter();
+        let state = wait_for_start(
+            || answers.next().expect("asked three times").to_owned(),
+            |_| {},
+        );
+        assert_eq!(state, "active");
+    }
+
+    #[test]
+    fn waiting_for_a_service_that_never_starts_is_bounded() {
+        let mut waited = Duration::ZERO;
+        let state = wait_for_start(|| "inactive".to_owned(), |pause| waited += pause);
+        assert_eq!(state, "inactive");
+        assert_eq!(waited, START_WAIT);
+    }
+
+    #[test]
+    fn the_unit_waits_longer_to_restart_than_install_waits_to_settle() {
+        assert!(TEMPLATE.contains("\nRestartSec=5s\n"), "RestartSec changed");
+        assert!(START_SETTLE < Duration::from_secs(5));
     }
 
     #[test]

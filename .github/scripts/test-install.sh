@@ -26,9 +26,13 @@ esac
 
 work=$(mktemp -d)
 server_pid=
+redirect_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then
         kill "$server_pid" 2>/dev/null
+    fi
+    if [ -n "$redirect_pid" ]; then
+        kill "$redirect_pid" 2>/dev/null
     fi
     rm -rf "$work"
 }
@@ -107,6 +111,11 @@ cp "$work/release/$asset" "$work/tampered/$asset"
 printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$asset" \
     >"$work/tampered/SHA256SUMS"
 
+# A release whose SHA256SUMS spells the hash in upper-case hex digits.
+mkdir -p "$work/upper"
+cp "$work/release/$asset" "$work/upper/$asset"
+printf '%s  %s\n' "$(printf '%s' "$sum" | tr 'a-f' 'A-F')" "$asset" >"$work/upper/SHA256SUMS"
+
 # A stub uname: the system comes from UNAME_S and UNAME_M.
 cat >"$work/stubs/uname" <<'EOF'
 #!/bin/sh
@@ -121,7 +130,7 @@ chmod 755 "$work/stubs/uname"
 # Serve the directory $work/serve over HTTP on a free port of 127.0.0.1. The three release
 # directories are served under their own names.
 mkdir -p "$work/serve"
-cp -R "$work/release" "$work/tampered" "$work/serve/"
+cp -R "$work/release" "$work/tampered" "$work/upper" "$work/serve/"
 mkdir -p "$work/serve/empty"
 if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 is needed for the local release server" >&2
@@ -215,6 +224,24 @@ printf 'junk' >"$work/bin1/mirrust"
 run_install MIRRUST_BASE_URL="$base/release" -- --prefix "$work/bin1"
 check "installing again replaces the file" sh -c "'$work/bin1/mirrust' --help | grep -q 'fake binary'"
 
+# An existing prefix keeps its mode: `install -d -m 0755` would widen a 0700 directory.
+mkdir -m 700 "$work/private-bin"
+run_install MIRRUST_BASE_URL="$base/release" -- --prefix "$work/private-bin"
+# shellcheck disable=SC2012 # the mode string of one known directory
+dir_mode=$(ls -ld "$work/private-bin" | cut -c1-10)
+check "an existing prefix directory keeps its mode" test "$status" -eq 0 -a \
+    "$dir_mode" = "drwx------" -a -x "$work/private-bin/mirrust"
+
+# A prefix that starts with a hyphen is a path, not an option of install or dirname.
+mkdir "$work/cwd"
+cd "$work/cwd" || exit 2
+run_install MIRRUST_BASE_URL="$base/release" -- --prefix -dash-bin/sub
+cd "$here" || exit 2
+check "a prefix that starts with a hyphen works" test "$status" -eq 0 -a -x "$work/cwd/-dash-bin/sub/mirrust"
+
+run_install MIRRUST_BASE_URL="$base/upper" -- --prefix "$work/bin-upper"
+check "a SHA256SUMS with upper-case hex digits matches" test "$status" -eq 0 -a -x "$work/bin-upper/mirrust"
+
 # --- failures that must install nothing ---
 
 run_install MIRRUST_BASE_URL="$base/tampered" -- --prefix "$work/bin5"
@@ -231,6 +258,51 @@ check "a missing release file: temporary files deleted" no_temp_left
 run_install UNAME_M=aarch64 MIRRUST_BASE_URL="$base/release" -- --prefix "$work/bin7"
 check "a SHA256SUMS entry that does not match the file: refused" sh -c \
     "[ $status -ne 0 ] && grep -q 'CHECKSUM MISMATCH' '$work/out' && [ ! -e '$work/bin7' ]"
+
+# A server that answers every request with a redirect to the same file on the release server
+# over plain http: curl follows that by default, install.sh must not (redirects go to https
+# only).
+cat >"$work/redirect.py" <<'EOF'
+import http.server
+import sys
+
+port, target = int(sys.argv[1]), sys.argv[2]
+
+
+class Redirect(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(302)
+        self.send_header("Location", target + self.path.rsplit("/", 1)[1])
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+http.server.HTTPServer(("127.0.0.1", port), Redirect).serve_forever()
+EOF
+redirect_port=$(python3 -I -c 'import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()')
+python3 -I "$work/redirect.py" "$redirect_port" "$base/release/" >"$work/redirect.log" 2>&1 &
+redirect_pid=$!
+tries=0
+until curl -s -o /dev/null "http://127.0.0.1:$redirect_port/x"; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 50 ]; then
+        echo "the redirect server did not start" >&2
+        exit 2
+    fi
+    sleep 0.1
+done
+check "the redirect server really redirects to the release (curl -L follows it)" sh -c \
+    "curl -fsSL 'http://127.0.0.1:$redirect_port/mirrust-linux-x86_64' | grep -q 'fake binary'"
+run_install MIRRUST_BASE_URL="http://127.0.0.1:$redirect_port" -- --prefix "$work/bin-redirect"
+kill "$redirect_pid" 2>/dev/null
+check "a redirect to plain http is refused and nothing is installed" sh -c \
+    "[ $status -ne 0 ] && grep -q 'failed' '$work/out' && [ ! -e '$work/bin-redirect' ]"
 
 # --- unsupported systems ---
 
@@ -260,7 +332,7 @@ done
 # (this machine has no wget; the real one takes the same two options).
 real_curl=$(command -v curl)
 mkdir -p "$work/nocurl"
-for tool in sh env mktemp rm mkdir dirname awk sha256sum shasum install cat ls id; do
+for tool in sh env mktemp rm mkdir dirname awk tr sha256sum shasum install cat ls id; do
     if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
         ln -sf "$found" "$work/nocurl/$tool"
     fi
@@ -280,7 +352,7 @@ env PATH="$work/nocurl" TMPDIR="$work/tmp" HOME="$work/home" MIRRUST_BASE_URL="$
 check "wget is used when curl is missing" sh -c "[ -x '$work/bin10/mirrust' ] && [ -e '$work/wget-used' ]"
 
 mkdir -p "$work/nodl"
-for tool in sh env mktemp rm mkdir dirname awk sha256sum shasum install cat grep; do
+for tool in sh env mktemp rm mkdir dirname awk tr sha256sum shasum install cat grep; do
     if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
         ln -sf "$found" "$work/nodl/$tool"
     fi
@@ -313,7 +385,7 @@ else
 
     # No sudo on PATH: the default prefix falls back to $HOME/.local/bin.
     mkdir -p "$work/nosudo"
-    for tool in sh env mktemp rm mkdir dirname awk sha256sum shasum install cat ls id grep curl; do
+    for tool in sh env mktemp rm mkdir dirname awk tr sha256sum shasum install cat ls id grep curl; do
         if found=$(command -v "$tool" 2>/dev/null) && [ -x "$found" ]; then
             ln -sf "$found" "$work/nosudo/$tool"
         fi
