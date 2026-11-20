@@ -31,6 +31,9 @@ RUN case "$TARGETARCH" in \
 ENV CC_x86_64_unknown_linux_musl=musl-gcc \
     CC_aarch64_unknown_linux_musl=musl-gcc
 
+# Keep the path where cargo unpacks the crates out of the binary: panic messages embed it.
+ENV RUSTFLAGS="--remap-path-prefix=/usr/local/cargo=/cargo"
+
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates

@@ -54,6 +54,10 @@ Notes:
 - The macOS binaries are not signed or notarized. A file fetched with `curl` runs; a file
   downloaded in a browser carries the quarantine flag, and Gatekeeper refuses it until
   `xattr -d com.apple.quarantine FILE`.
+- The build sets `RUSTFLAGS=--remap-path-prefix=<CARGO_HOME>=/cargo` (the Docker build the same
+  for `/usr/local/cargo`), so that the runner's home directory (`/home/runner/.cargo/...`) is not
+  embedded in the panic messages of the binary. Check a new release with
+  `strings mirrust-linux-x86_64 | grep -c /home/runner`, which should print 0.
 - The build uses the current stable Rust and no build cache, so that every release is built
   from scratch. The MSRV (1.88) is checked by CI, not by the release.
 - **Fallback if musl does not work.** If a musl build fails and cannot be fixed, build that

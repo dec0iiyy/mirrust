@@ -154,10 +154,18 @@ jobs:
       - name: Use the prebuilt NASM objects of aws-lc-sys
         if: matrix.windows
         run: echo "AWS_LC_SYS_PREBUILT_NASM=1" >> "$GITHUB_ENV"
+      # Panic messages and debug assertions embed the path of the source file. Without the
+      # remapping, the home directory of the runner ends up in the binary
+      # (/home/runner/.cargo/registry/src/...). CARGO_HOME is where cargo unpacks the crates;
+      # USERPROFILE is the native form of the home directory in Git for Windows' bash.
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo build --release --locked --bin mirrust --target "$TARGET"
+        run: |
+          set -euo pipefail
+          cargo_home="${CARGO_HOME:-${USERPROFILE:-$HOME}/.cargo}"
+          export RUSTFLAGS="--remap-path-prefix=$cargo_home=/cargo"
+          cargo build --release --locked --bin mirrust --target "$TARGET"
       # A binary that is not static would fail on a distribution without the right glibc,
       # and the smoke test below runs in containers that have one.
       - name: Check that the binary is static
