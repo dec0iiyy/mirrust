@@ -1,0 +1,63 @@
+name: Fuzz
+
+# Runs each cargo-fuzz target in fuzz/ for 60 seconds, starting from the committed seeds in
+# fuzz/corpus/. A crash fails the job, prints the input in hex and uploads fuzz/artifacts/.
+on:
+  schedule:
+    - cron: "43 3 * * 4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # A dated nightly, so a run is reproducible; cargo-fuzz needs nightly for the sanitizer flags.
+  NIGHTLY: nightly-2026-05-22
+  CARGO_FUZZ_VERSION: 0.13.2
+
+jobs:
+  fuzz:
+    name: cargo fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust (nightly)
+        run: |
+          rustup toolchain install "$NIGHTLY" --profile minimal --no-self-update
+          rustup default "$NIGHTLY"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: fuzz -> target
+      # rust-cache keeps ~/.cargo/bin, so this builds cargo-fuzz only on a cache miss.
+      - name: Install cargo-fuzz
+        run: cargo install --locked "cargo-fuzz@$CARGO_FUZZ_VERSION"
+      - name: Build the targets
+        run: cargo fuzz build
+      - name: Run each target for 60 seconds
+        run: |
+          status=0
+          for target in $(cargo fuzz list); do
+            echo "::group::$target"
+            cargo fuzz run "$target" "fuzz/corpus/$target" -- -max_total_time=60 -timeout=10 \
+              || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+      - name: Print crash inputs
+        if: failure()
+        run: |
+          for file in fuzz/artifacts/*/*; do
+            [ -f "$file" ] || continue
+            echo "$file"
+            od -An -v -tx1 "$file" | tr -d ' \n'
+            echo
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
