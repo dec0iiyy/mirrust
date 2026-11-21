@@ -71,8 +71,8 @@ good, run `curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/downlo
 which puts `mirrust` in `/usr/local/bin`. To build it yourself you need Rust 1.88 or later:
 `cargo build --release`, then `./target/release/mirrust`.
 
-Open <https://localhost:8443> in a browser for the page: the score, every check behind it, the
-fingerprints, the cipher suites and extensions in the order sent, and the full JSON. The
+Open <https://localhost:8443> in a browser for the page: the score, every check behind it, what
+differs from the browser the `User-Agent` claims, the fingerprints, the cipher suites and extensions in the order sent, and the full JSON. The
 certificate is self-signed, so use `curl -k` on the command line, where `/` prints a plain-text
 report:
 
@@ -181,7 +181,7 @@ the internet, with the Let's Encrypt staging CA and then production (see
 
 ## Status
 
-Version 0.1.5. 368 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
+Version 0.1.6. 388 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
 in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container image is built
 and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
 unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with
