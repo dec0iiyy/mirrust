@@ -1,0 +1,6 @@
+target/
+artifacts/
+coverage/
+# libFuzzer adds its finds to the corpus directory; only the seeds seeds.py writes are kept.
+corpus/*/*
+!corpus/*/*.bin

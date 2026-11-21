@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The cargo-fuzz crate has its own workspace and lockfile and builds with nightly only.
+exclude = ["fuzz"]
 
 [workspace.package]
 edition = "2024"
