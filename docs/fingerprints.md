@@ -777,7 +777,8 @@ returned it:
 }
 ```
 
-(The `detail` of `tcp_os` is shortened here.) The penalties are 40 and 30, so the score is 30.
+(The `detail` of `tcp_os` is shortened here, and the `diff` that follows `checks` is shown
+under [Diff](#diff-auditdiff).) The penalties are 40 and 30, so the score is 30.
 Each check has `id`, `status`, `title` and `detail`, in that order; the penalty is not in the
 JSON.
 
@@ -802,3 +803,96 @@ they are reported:
 
 The score describes consistency as far as this server can observe it and for the clients in
 its dataset. It is not proof that a client is, or is not, what it claims to be.
+
+### Diff (`audit.diff`)
+
+The checks say that a layer gives the client away; `diff` says what differs, against one
+named entry of the dataset. It is information only: it takes nothing off the score and
+changes no check.
+
+It is there when the `User-Agent` claims Chrome, Firefox or Safari (Edge, and Brave and Opera,
+which parse as Chrome, are compared with the Chrome entries) and at least one layer below
+differs. It is absent for a client that claims no browser or a family the dataset has no entry
+for over the connection's transport (the dataset has a QUIC entry for Chrome only), and when
+nothing differs.
+
+The reference is one entry of the claimed family with the same transport (`t` or `q`, the
+first JA4 character; a hello with QUIC transport parameters is QUIC). Ranked in order:
+
+1. An entry whose cipher suites and extensions equal the connection's comes first: the
+   connection then has that browser's TLS stack, and a version that disagrees is for
+   `ua_version` to judge.
+2. The entry whose `version_min`..`version_max` range holds the claimed major version, or
+   otherwise is nearest to it. A `User-Agent` without a version counts as the newest.
+3. Among those, the entry whose extension and cipher sets differ from the connection's in the
+   fewest values; then the first in the file.
+
+The layers:
+
+- `tls`: `missing_extensions` and `extra_extensions` compare the connection's extension types
+  with the entry's `ja4_r`; `missing_ciphers` and `extra_ciphers` do the same for cipher
+  suites. GREASE is ignored, and so are `server_name` and ALPN, as JA4 ignores them. Each value
+  is `{"id": N, "name": "..."}` with the IANA name the report prints elsewhere (`null` when the
+  table has none; 17613 is named `application_settings`). The lists are compared as sets:
+  `ja4_r` is sorted, so the dataset does not record the reference's order and the diff says
+  nothing about order.
+- `http2`: only when the connection used HTTP/2. `yours` and `reference` are the Akamai
+  strings; `reference` is `null` when the entry has no HTTP/2 capture (the uTLS entries), and
+  then nothing is compared. `differences` lists each SETTINGS value that differs or is sent by
+  one side only (`SETTINGS INITIAL_WINDOW_SIZE (4)`), `settings order` when the values agree
+  but their order does not, `WINDOW_UPDATE`, `PRIORITY` and `pseudo-header order`, each with
+  `yours` and `reference` (`null` for a value one side does not send).
+- `headers`: the headers the `headers` check found missing (`missing`, the same names). They
+  come from what that check expects of the claimed browser, not from the entry.
+
+This is the `diff` for the curl request above (lists shortened here):
+
+```json
+"diff": {
+  "reference": {
+    "family": "Chrome",
+    "version": "155-160 (Canary 160.0.8171.0)",
+    "kind": "captured",
+    "also_captured": false,
+    "source": "captured locally, Google Chrome Canary 160.0.8171.0 headless, macOS 27.2.1, HTTP/2, first connection of a fresh profile; the same JA4 as uTLS profile Chrome-155 (corpus/hellos.jsonl)"
+  },
+  "tls": {
+    "missing_extensions": [
+      { "id": 5, "name": "status_request" },
+      ...
+      { "id": 17613, "name": "application_settings" },
+      ...
+    ],
+    "extra_extensions": [],
+    "missing_ciphers": [],
+    "extra_ciphers": [
+      { "id": 4, "name": "TLS_RSA_WITH_RC4_128_MD5" },
+      ...
+    ]
+  },
+  "http2": {
+    "yours": "3:100;4:10485760;2:0|1048510465|0|m,s,a,p",
+    "reference": "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p",
+    "differences": [
+      { "field": "SETTINGS HEADER_TABLE_SIZE (1)", "yours": null, "reference": "65536" },
+      { "field": "SETTINGS MAX_CONCURRENT_STREAMS (3)", "yours": "100", "reference": null },
+      ...
+    ]
+  },
+  "headers": {
+    "missing": ["sec-ch-ua", "sec-fetch-*", "accept-language", "accept-encoding"]
+  }
+}
+```
+
+`reference.kind` is `utls_profile`, `curl_impersonate` or `captured`, read from the start of
+the entry's `source`; `also_captured` is true for a profile or signature entry whose source
+says the same hello was also captured from a browser. `http2` and `headers` are left out when
+they do not apply.
+
+Read it with its limits in mind. The reference is one recorded sample, not a specification of
+the browser: versions between the recorded ones were not looked at, a browser's hello changes
+with its settings and platform, and HTTP/2 settings and headers depend on the request (a
+navigation, a `fetch` and a subresource load differ). An empty diff, or none, does not mean a
+site will accept the client: sites look at more than these layers, and at the TCP stack,
+timing and behaviour that this diff does not cover.

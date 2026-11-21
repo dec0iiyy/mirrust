@@ -34,7 +34,7 @@ missing browser headers behind it.
 
 | | |
 | --- | --- |
-| **A verdict, not just hashes** | An `audit` score from 0 to 100 compares the `User-Agent`, the TLS stack, the HTTP/2 settings and the request headers, and says which layer gives the client away. |
+| **A verdict, not just hashes** | An `audit` score from 0 to 100 compares the `User-Agent`, the TLS stack, the HTTP/2 settings and the request headers, and says which layer gives the client away. A client that claims a browser also gets a diff against a named recorded sample of that browser: the extensions, cipher suites, HTTP/2 settings and headers that differ. |
 | **Every layer on one port** | TLS over TCP and QUIC, HTTP/1.1, HTTP/2 and HTTP/3, all served from one address. |
 | **The fingerprints people use** | JA4 per the FoxIO specification (with `_o`, `_r` and `_ro`), JA3, PeetPrint and the Akamai HTTP/2 string, in the JSON layout of tls.peet.ws, plus an HTTP/3 fingerprint of its own. |
 | **Knows real clients** | A dataset of 52 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, Java, Ruby, rustls and okhttp. |

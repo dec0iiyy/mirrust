@@ -417,7 +417,7 @@ The keys come in this order: `ip`, `http_version`, `method`, `user_agent`, `tls`
 | `http3` | HTTP/3 only: `fingerprint`, `fingerprint_hash`, `settings` (the client's SETTINGS as `{id, name, value}` in wire order) and `streams` (the unidirectional streams it opened as `{id, type, name}`), as of the connection's first request. |
 | `tcpip` | `{"ip": {}, "tcp": {}}`, and on Linux, for a TCP connection whose SYN the kernel kept, also `tcp_syn` and `p0f` ([fingerprints.md](fingerprints.md#10-tcp-syn-and-p0f)). |
 | `client` | The known client the TLS fingerprint matches, and whether the `User-Agent` agrees; below. |
-| `audit` | A consistency score from 0 to 100, a verdict (`consistent`, `suspicious` or `inconsistent`), and the checks behind it: `User-Agent` against the TLS stack, TLS against HTTP/2, request headers, and more. `null` when `tls` is `null`. See [docs/fingerprints.md](fingerprints.md#audit). |
+| `audit` | A consistency score from 0 to 100, a verdict (`consistent`, `suspicious` or `inconsistent`), and the checks behind it: `User-Agent` against the TLS stack, TLS against HTTP/2, request headers, and more. `null` when `tls` is `null`. See [docs/fingerprints.md](fingerprints.md#audit). When the `User-Agent` claims a browser the dataset has and a layer differs from its closest entry, also `diff`: the named reference entry (`reference`: `family`, `version`, `kind`, `also_captured`, `source`), `tls` (`missing_extensions`, `extra_extensions`, `missing_ciphers`, `extra_ciphers`, each a list of `{"id", "name"}`), `http2` (`yours`, `reference`, `differences`, only over HTTP/2) and `headers` (`missing`). It takes nothing off the score. See [docs/fingerprints.md](fingerprints.md#diff-auditdiff). |
 
 `tls` contains:
 
@@ -529,10 +529,11 @@ colour: ?color=1  JSON: /api/all  short JSON: /api/clean  page: /?format=html
 The same request over `--http1.1` starts with `mirrust  (HTTP/1.1, TLS 1.3, ...)`, has no `akamai`
 row and no HTTP/2 check. Over HTTP/3 the `akamai` row is an `http3` row with the hash and string
 of the HTTP/3 fingerprint. With a Chrome `User-Agent` on the same curl, the checks that fail come
-first:
+first, and a `DIFF` block after the checks says what separates the connection from the closest
+recorded Chrome ([fingerprints.md](fingerprints.md#diff-auditdiff)):
 
 ```
-mirrust  (h2, TLS 1.3, 127.0.0.1:54906)
+mirrust  (h2, TLS 1.3, 127.0.0.1:55306)
 
 AUDIT  30/100  [######              ]  inconsistent
   Looks like curl 8.7.1 (exact match). The User-Agent claims Chrome.
@@ -545,8 +546,36 @@ AUDIT  30/100  [######              ]  inconsistent
          sec-fetch-*, accept-language, accept-encoding
   [ ok ] TLS fingerprint against known clients
          Identical to curl 8.7.1
+  [ ok ] HTTP/2 fingerprint against the client
+         Settings, window and header order are those of curl
+  [skip] TCP stack against the User-Agent
+         Not measured: this server did not capture the TCP SYN. Behind a proxy
+         or tunnel the TCP stack is the exit's, the User-Agent the device's,
+         and the two disagree here
+
+DIFF -------------------------------------------------------------------------
+  Reference           Chrome 155-160 (Canary 160.0.8171.0); captured from the
+                      browser
+  Extensions missing  status_request (5), signed_certificate_timestamp (18),
+                      extended_master_secret (23), compress_certificate (27),
+                      session_ticket (35), and 5 more
+  Ciphers extra       TLS_RSA_WITH_RC4_128_MD5, TLS_RSA_WITH_RC4_128_SHA,
+                      TLS_RSA_WITH_3DES_EDE_CBC_SHA, and 31 more
+  HTTP/2 yours        3:100;4:10485760;2:0|1048510465|0|m,s,a,p
+  HTTP/2 reference    1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p
+  HTTP/2 differs in   HEADER_TABLE_SIZE (1), MAX_CONCURRENT_STREAMS (3),
+                      INITIAL_WINDOW_SIZE (4), MAX_HEADER_LIST_SIZE (6),
+                      WINDOW_UPDATE, pseudo-header order
+  Headers missing     sec-ch-ua, sec-fetch-*, accept-language, accept-encoding
+
+FINGERPRINTS -----------------------------------------------------------------
 ...
 ```
+
+The block names the dataset entry it compares with and where that sample came from; it has a
+row only for what differs, and a list longer than about two lines (three for extensions) ends
+in `and N more`, with the full lists in `/api/all`. It changes nothing in the score. Without a
+browser claim the dataset can answer, or with nothing different, there is no block.
 
 Layout rules: each check is a badge (`[ ok ]`, `[WARN]`, `[FAIL]`, `[skip]`), its title and
 its detail indented under the title; long text wraps at the 78th column with a hanging indent
@@ -622,7 +651,7 @@ the server keeps serving, and the entries it can no longer queue are counted as 
 | Crate | Path | Contents |
 | --- | --- | --- |
 | `fingerprint` | `crates/fingerprint` | ClientHello parser, JA3, JA4 (FoxIO), the tls.peet.ws JA4 variant, PeetPrint, readable cipher and extension details, and the known-client lookup over `corpus/clients.jsonl`. |
-| `audit` | `crates/audit` | The consistency checks and the score: whether the layers of a connection agree with the client it claims to be. Uses `fingerprint`; no I/O. |
+| `audit` | `crates/audit` | The consistency checks and the score: whether the layers of a connection agree with the client it claims to be; and the diff against the closest dataset entry of the claimed browser. Uses `fingerprint`; no I/O. |
 | `http2` | `crates/http2` | HTTP/2 frame capture, Akamai fingerprint, and the one-request HTTP/2 responder. |
 | `quic` | `crates/quic` | Extracts the ClientHello from a client's QUIC v1/v2 Initial packets, without a QUIC stack. |
 | `http3` | `crates/http3` | HTTP/3 SETTINGS and unidirectional stream types from the first bytes of each stream, and their fingerprint. Parsing only. |

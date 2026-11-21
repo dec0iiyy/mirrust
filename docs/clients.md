@@ -55,7 +55,10 @@ thing, the `User-Agent` another (`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 
 Changing the `User-Agent` fixes one layer of four. A client that wants to pass has to change
 the TLS handshake, the HTTP/2 settings and the header order as well, and keep the TCP stack
-in line with the operating system it claims.
+in line with the operating system it claims. For each of these clients `audit.diff` (the
+`DIFF` block of the text report) lists what differs from the closest recorded Chrome entry,
+which it names; it is a recorded sample, not a specification, and an empty diff does not mean
+a site will accept the client ([fingerprints.md](fingerprints.md#diff-auditdiff)).
 
 ## Reproduce
 
