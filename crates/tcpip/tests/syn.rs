@@ -75,6 +75,45 @@ fn ipv6_omits_ipv4_only_fields() {
     );
 }
 
+/// The IPv6 SYN of a Linux client one hop away on an Ethernet link, as the CI network test
+/// sends it: `fd77::2` port 50000 to `fd77::1` port 8443, hop limit 64, MSS 1440, window 64800,
+/// Linux's option order with window scale 7.
+const LINUX_V6: &str = "6000000000280640fd770000000000000000000000000002\
+                        fd770000000000000000000000000001\
+                        c35020fb0102030400000000a002fd2000000000\
+                        020405a00402080a010203040000000001030307";
+
+/// The `tcpip` object the network test reads over IPv6 (`.github/scripts/syn-network-test.sh`):
+/// the addresses print without brackets, the hop limit is `ttl`, and p0f starts with `6:`.
+#[test]
+fn an_ipv6_syn_reports_what_the_network_test_asserts() {
+    let syn = Syn::parse(&decode_hex(LINUX_V6)).expect("SYN was parsed");
+    let json = serde_json::to_value(tcpip::TcpIp::new(Some(syn))).expect("serialize");
+    let syn = &json["tcp_syn"];
+    assert_eq!(syn["ip_version"], 6, "{json}");
+    assert_eq!(
+        (&syn["src_ip"], &syn["dst_ip"]),
+        (&"fd77::2".into(), &"fd77::1".into())
+    );
+    assert_eq!(
+        (&syn["src_port"], &syn["dst_port"]),
+        (&50000.into(), &8443.into())
+    );
+    assert_eq!(syn["ttl"], 64, "the hop limit");
+    assert_eq!(syn["mss"], 1440);
+    assert_eq!(syn["window"], 64800);
+    assert_eq!(
+        syn["options"],
+        serde_json::json!(["mss", "sackOK", "timestamp", "nop", "wscale"])
+    );
+    assert_eq!(syn["payload_len"], 0);
+    assert!(
+        syn.get("ip_id").is_none() && syn.get("df").is_none(),
+        "{syn}"
+    );
+    assert_eq!(json["p0f"], "6:64+?:0:1440:64800,7:mss,sok,ts,nop,ws::0");
+}
+
 #[test]
 fn truncated_packets_never_panic() {
     for packet in [SAMPLE_V4, SAMPLE_V6].map(decode_hex) {

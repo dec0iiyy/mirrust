@@ -94,7 +94,8 @@ jobs:
 
   syn-network:
     # The TCP SYN capture over a connection between two addresses: the server and curl in two
-    # network namespaces joined by a veth pair. The test job sees only a loopback SYN.
+    # network namespaces joined by a veth pair, over IPv4, over IPv6 (unique local addresses)
+    # and from an IPv4 client to a `[::]` listener. The test job sees only loopback SYNs.
     name: SYN over a network
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -111,7 +112,7 @@ jobs:
       - name: shellcheck
         run: shellcheck .github/scripts/syn-network-test.sh
       # Root, because the script creates network namespaces.
-      - name: SYN between two network namespaces
+      - name: SYN between two network namespaces, IPv4 and IPv6
         run: sudo .github/scripts/syn-network-test.sh target/release/mirrust
 
   install-script:
