@@ -440,7 +440,7 @@ The keys come in this order: `ip`, `http_version`, `method`, `user_agent`, `tls`
 | Field | Content |
 | --- | --- |
 | `match` | `exact`: the `ja4` equals a known client's. `ciphers`: only its cipher list does. `none`: neither. |
-| `family`, `version`, `library`, `source` | The matched entry of `corpus/clients.jsonl`: client label, observed version or range, TLS library, and where the sample came from. `null` without a match. |
+| `family`, `version`, `library`, `source` | The matched entry of `crates/fingerprint/data/clients.jsonl`: client label, observed version or range, TLS library, and where the sample came from. `null` without a match. |
 | `user_agent_family` | What the `User-Agent` claims: `Chrome`, `Edge`, `Firefox`, `Safari`, `curl`, `Go`, `Python`, `Node`, `okhttp` or `unknown`. |
 | `consistent` | Whether the two agree, for an `exact` match with a recognized `User-Agent`; otherwise `null`. An Edge `User-Agent` is consistent with a Chrome match, since Chromium-based browsers share Chrome's TLS stack. |
 
@@ -651,7 +651,7 @@ the server keeps serving, and the entries it can no longer queue are counted as 
 
 | Crate | Path | Contents |
 | --- | --- | --- |
-| `fingerprint` | `crates/fingerprint` | ClientHello parser, JA3, JA4 (FoxIO), the tls.peet.ws JA4 variant, PeetPrint, readable cipher and extension details, and the known-client lookup over `corpus/clients.jsonl`. |
+| `fingerprint` | `crates/fingerprint` | ClientHello parser, JA3, JA4 (FoxIO), the tls.peet.ws JA4 variant, PeetPrint, readable cipher and extension details, and the known-client lookup over `crates/fingerprint/data/clients.jsonl`. |
 | `audit` | `crates/audit` | The consistency checks and the score: whether the layers of a connection agree with the client it claims to be; and the diff against the closest dataset entry of the claimed browser. Uses `fingerprint`; no I/O. |
 | `http2` | `crates/http2` | HTTP/2 frame capture, Akamai fingerprint, and the one-request HTTP/2 responder. |
 | `quic` | `crates/quic` | Extracts the ClientHello from a client's QUIC v1/v2 Initial packets, without a QUIC stack. |
@@ -660,7 +660,7 @@ the server keeps serving, and the entries it can no longer queue are counted as 
 | `server` | `crates/server` | The `mirrust` binary: TLS, HTTP/1.1, HTTP/2, HTTP/3, routes, request log. |
 | `fpdiff` | `crates/diff` | The `fpdiff` binary and library: semantic diff of two TLS (and HTTP/2) fingerprints. |
 | `golden` | `crates/golden` | Test support: the snapshot files under `corpus/` and the bless mode. Not used by the server. |
-| `corpus-sync` | `crates/corpus-sync` | Dev tool: prints the `corpus/clients.jsonl` lines that curl-impersonate's captured test signatures add (see CONTRIBUTING.md). Not part of a release. |
+| `corpus-sync` | `crates/corpus-sync` | Dev tool: prints the `crates/fingerprint/data/clients.jsonl` lines that curl-impersonate's captured test signatures add (see CONTRIBUTING.md). Not part of a release. |
 
 `fpdiff REFERENCE CANDIDATE` reads tls.peet.ws-style JSON (`/api/all`, `/api/tls`, or a bare
 `tls` object) or a ClientHello in hex (handshake message or TLS record); `-` reads stdin. It
@@ -700,7 +700,7 @@ $ MIRRUST_BLESS=1 cargo test
 $ git diff corpus/
 ```
 
-`corpus/clients.jsonl` is not a snapshot but the known-client dataset behind the `client` field:
+`crates/fingerprint/data/clients.jsonl` is not a snapshot but the known-client dataset behind the `client` field:
 52 entries: 21 from the browser profiles of `hellos.jsonl`, 7 from the signatures of
 curl-impersonate and 24 captured from clients through the server. Tests check that it parses, that its JA4s are unique and are the hashes of their
 `ja4_r`, and that every profile of `hellos.jsonl` with SNI is in it.

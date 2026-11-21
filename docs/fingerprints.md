@@ -652,7 +652,7 @@ report does not use the version.
 
 ### 12.3 The dataset
 
-`corpus/clients.jsonl` is built into the `fingerprint` crate (`fingerprint::known`). One JSON
+`crates/fingerprint/data/clients.jsonl` is built into the `fingerprint` crate (`fingerprint::known`). One JSON
 object per line, one line per JA4:
 
 | Key | Content |

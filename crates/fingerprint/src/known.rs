@@ -1,8 +1,8 @@
 //! Known clients: which client a JA4 was seen from, and what a `User-Agent` claims to be.
 //!
-//! The dataset is `corpus/clients.jsonl`, built into the crate. A match means "identical to a
-//! client in the dataset", not proof of identity: a client can copy another's ClientHello, and
-//! JA4 sorts ciphers and extensions, so their order plays no part.
+//! The dataset is `data/clients.jsonl` in this crate, built into it. A match means "identical
+//! to a client in the dataset", not proof of identity: a client can copy another's ClientHello,
+//! and JA4 sorts ciphers and extensions, so their order plays no part.
 
 use std::sync::LazyLock;
 
@@ -10,10 +10,10 @@ use serde_json::Value;
 
 use crate::Ja4;
 
-const DATASET: &str = include_str!("../../../corpus/clients.jsonl");
+const DATASET: &str = include_str!("../data/clients.jsonl");
 
 static CLIENTS: LazyLock<Vec<Client>> = LazyLock::new(|| {
-    parse(DATASET).unwrap_or_else(|error| panic!("corpus/clients.jsonl is invalid: {error}"))
+    parse(DATASET).unwrap_or_else(|error| panic!("data/clients.jsonl is invalid: {error}"))
 });
 
 /// One line of the dataset: a client and the JA4 it was seen with.

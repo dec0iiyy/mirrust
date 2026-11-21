@@ -1,5 +1,5 @@
 //! The browser profiles of `corpus/hellos.jsonl` against the known clients of
-//! `corpus/clients.jsonl`: each profile with SNI is in the dataset under its name.
+//! `crates/fingerprint/data/clients.jsonl`: each profile with SNI is in the dataset under its name.
 
 use fingerprint::known::{self, Match};
 use fingerprint::{ClientHello, Ja4, Transport};

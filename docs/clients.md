@@ -11,7 +11,7 @@ Two limits of these numbers:
   checks only. On a Linux server on the internet the score can also drop because of the TCP
   SYN (see [reference.md](reference.md)).
 - **The built-in dataset has an entry for each of these builds**, captured on the same Mac
-  (`corpus/clients.jsonl`; for `reqwest` the entry is rustls 0.23.46 with its default
+  (`crates/fingerprint/data/clients.jsonl`; for `reqwest` the entry is rustls 0.23.46 with its default
   configuration). So "mirrust names it correctly" in the first table is expected. What the tables show is how the named client, its `User-Agent` and its
   HTTP/2 settings fit together.
 

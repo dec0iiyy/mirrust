@@ -1,8 +1,8 @@
-//! `corpus-sync`: prints, as JSON Lines, the `corpus/clients.jsonl` entries that
+//! `corpus-sync`: prints, as JSON Lines, the `crates/fingerprint/data/clients.jsonl` entries that
 //! curl-impersonate's captured test signatures add.
 //!
 //! ```console
-//! $ cargo run -p corpus-sync -- path/to/curl-impersonate [corpus/clients.jsonl]
+//! $ cargo run -p corpus-sync -- path/to/curl-impersonate [crates/fingerprint/data/clients.jsonl]
 //! ```
 //!
 //! New lines go to stdout; signatures the dataset already has, and skipped ones, to stderr.
@@ -31,9 +31,10 @@ fn run() -> Result<()> {
     let Some(checkout) = args.next().map(PathBuf::from) else {
         bail!("usage: corpus-sync <curl-impersonate checkout> [clients.jsonl]");
     };
-    let dataset_path = args
-        .next()
-        .map_or_else(|| PathBuf::from("corpus/clients.jsonl"), PathBuf::from);
+    let dataset_path = args.next().map_or_else(
+        || PathBuf::from("crates/fingerprint/data/clients.jsonl"),
+        PathBuf::from,
+    );
     let dataset = fs::read_to_string(&dataset_path)
         .with_context(|| format!("reading {}", dataset_path.display()))?;
     let commit = upstream_commit(&checkout)?;

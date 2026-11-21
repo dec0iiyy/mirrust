@@ -96,7 +96,7 @@ lines.
 
 ## Keeping the dataset fresh
 
-`corpus/clients.jsonl` (docs/fingerprints.md section 12.3) ages with every browser release.
+`crates/fingerprint/data/clients.jsonl` (docs/fingerprints.md section 12.3) ages with every browser release.
 The workflow `.github/workflows/corpus-sync.yml` runs on Mondays and on demand: it clones
 curl-impersonate (MIT) shallowly, runs `crates/corpus-sync`, appends the lines it prints,
 runs `cargo test -p fingerprint` and pushes the result to the branch `corpus-sync` with one
@@ -112,7 +112,7 @@ widening candidates. By hand:
 
 ```console
 $ git clone --depth 1 https://github.com/lexiforest/curl-impersonate.git /tmp/curl-impersonate
-$ cargo run -p corpus-sync -- /tmp/curl-impersonate corpus/clients.jsonl >> corpus/clients.jsonl
+$ cargo run -p corpus-sync -- /tmp/curl-impersonate crates/fingerprint/data/clients.jsonl >> crates/fingerprint/data/clients.jsonl
 $ cargo test -p fingerprint
 ```
 

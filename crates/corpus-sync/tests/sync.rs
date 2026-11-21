@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-const DATASET: &str = include_str!("../../../corpus/clients.jsonl");
+const DATASET: &str = include_str!("../../fingerprint/data/clients.jsonl");
 const COMMIT: &str = "5b1c354";
 
 fn signatures() -> &'static Path {

@@ -1,7 +1,7 @@
 //! Fetches a path from a mirror over HTTP/1.1 with a stock rustls client and prints the body.
 //!
 //! The certificate is not verified, so this works against the self-signed certificate. The
-//! ClientHello is what rustls sends by default; the rustls entries of `corpus/clients.jsonl`
+//! ClientHello is what rustls sends by default; the rustls entries of `crates/fingerprint/data/clients.jsonl`
 //! were captured with it.
 //!
 //! ```console
