@@ -1,0 +1,17 @@
+[package]
+name = "corpus-sync"
+description = "Dev tool: proposes new corpus/clients.jsonl lines from curl-impersonate's test signatures"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+fingerprint.workspace = true
+http2 = { path = "../http2" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

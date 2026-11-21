@@ -1,0 +1,10 @@
+browser:
+  name: chrome
+  version: '152'
+  os: windows_10
+  target: chrome152
+signature:
+  tls_client_hello:
+    partial: true
+    ciphersuites:
+    - 4865
