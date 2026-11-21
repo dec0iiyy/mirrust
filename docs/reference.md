@@ -69,9 +69,10 @@ Flags, API, fields, the request log and the workspace. For the short version see
   compared.
 
 On Linux, for TCP connections, it also reports the TCP SYN: the `tcp_syn` details and a p0f v3
-signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). A test in CI on
-Ubuntu reads a loopback SYN through this path; one live report from the internet showed the
-`tcp_mss` check passing, which is not yet a survey of real traffic, see
+signature, from the SYN the kernel keeps for the server (`TCP_SAVE_SYN`). CI on Ubuntu reads
+a loopback SYN through this path, and a SYN sent between two network namespaces with
+distinct addresses; one live report from the internet showed the `tcp_mss` check passing,
+which is not yet a survey of real traffic, see
 [docs/architecture.md](architecture.md#known-gaps).
 
 The JSON layout follows tls.peet.ws, so tools written against that service can read
@@ -110,8 +111,12 @@ Not yet seen at scale: the SYN on Linux. The parser in `crates/tcpip` is tested 
 packets. On Linux the server takes the SYN of each TCP connection from the kernel and fills
 `tcpip.tcp_syn` and `tcpip.p0f`; that path was written on macOS, a CI test on Ubuntu reads a
 loopback SYN through it, and one report from a server on the internet showed the `tcp_mss`
-check passing. Middleboxes and NAT change TTL, MSS and options on the way, so treat the TCP
-checks as unproven on real traffic.
+check passing. A second CI job (`.github/scripts/syn-network-test.sh`) runs the server in one
+network namespace and curl in another, joined by a veth pair (10.77.0.1 and 10.77.0.2): it
+checks the SYN's fields, that `tcp_mss` is measured, and that `tcp_os` passes with a Linux
+`User-Agent` and fails with a Windows one. That covers one hop on one Ubuntu runner kernel,
+not the internet: middleboxes, NAT and tunnel or proxy hops change TTL, MSS and options on
+the way, so treat the TCP checks as unproven on real traffic.
 
 Tested: `cargo test --workspace` (368 tests) in CI on Ubuntu, macOS and Windows; clippy and
 `cargo fmt --all --check` in CI on Ubuntu; `cargo check` of all targets with Rust 1.88, the

@@ -189,8 +189,10 @@ Chrome, HTTP/3. Since then it has also run on port 443 of an Ubuntu 24.04 server
 internet, installed with `mirrust install`, with a Let's Encrypt certificate it obtained itself,
 and answered over HTTP/1.1 and HTTP/2. Not run yet: IPv6, log rotation, HTTP/3 against that
 server and HTTP/3 in the container. On Linux the server takes each connection's TCP SYN from
-the kernel for the TCP checks of the `audit`; a test on Ubuntu in CI reads a loopback SYN, and
-one report from the internet showed the MSS check passing, but that is a single look. On macOS
+the kernel for the TCP checks of the `audit`; CI on Ubuntu reads a loopback SYN and a SYN sent
+between two network namespaces with distinct addresses, and one report from the internet
+showed the MSS check passing, but that is a single look: middleboxes, NAT and tunnel or proxy
+hops change TTL, MSS and options, and the runner's is the only kernel tested. On macOS
 and Windows the TCP checks show as not measured. Details are in
 [Reference](docs/reference.md#status).
 

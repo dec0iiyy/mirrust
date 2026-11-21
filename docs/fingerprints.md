@@ -555,7 +555,8 @@ else `0`.
 
 The server has a SYN on Linux only, for TCP connections: the one the kernel saved for the
 listening socket (`TCP_SAVE_SYN`), which is the packet from the IP header to the end of the
-TCP header, so `payload_len` is always 0 there. That path has not run on Linux yet; see
+TCP header, so `payload_len` is always 0 there. On Linux, CI runs that path on a loopback
+connection and between two network namespaces, but not on internet traffic; see
 [architecture.md](architecture.md#known-gaps).
 
 ## 11. JSON encoding

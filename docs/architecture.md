@@ -373,17 +373,23 @@ function of the command's exit code, the scores and `--fail-under`.
 
 ## Known gaps
 
-- **SYN capture is for Linux and TCP only, and is proven on a loopback connection in CI, plus
-  one report from a server on the internet.** The code was written on macOS, where the socket
-  options do not exist; its first build and run was CI's on Ubuntu
-  (`tcpip_has_the_syn_where_the_kernel_keeps_it` in `crates/server/tests/api.rs`), which reads
-  the SYN of a loopback connection, checks its fields and the `tcp_os` check with a Linux
-  `User-Agent`. The kernel keeps only the SYNs
-  that arrive after the option is set, so `keep_syn` runs right after the port is bound.
-  Until more reports from real clients have been looked at, treat `tcpip.tcp_syn`,
-  `p0f` and the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic (middleboxes
-  and NAT change TTL, MSS and options on the way). What is known to be missing or different
-  from a packet capture:
+- **SYN capture is for Linux and TCP only, and is checked in CI on a loopback connection and
+  between two network namespaces, plus one report from a server on the internet.** The code
+  was written on macOS, where the socket options do not exist; its first build and run was
+  CI's on Ubuntu (`tcpip_has_the_syn_where_the_kernel_keeps_it` in
+  `crates/server/tests/api.rs`), which reads the SYN of a loopback connection, checks its
+  fields and the `tcp_os` check with a Linux `User-Agent`. The CI job `syn-network` runs
+  `.github/scripts/syn-network-test.sh`: the release binary listens on 10.77.0.1 in one
+  network namespace and curl calls it from 10.77.0.2 in another, over a veth pair, so the SYN
+  comes from another network stack over an interface. It checks the addresses and ports, TTL,
+  MSS, window and options in ranges, the p0f signature, that `tcp_mss` is measured, and that
+  `tcp_os` passes with a Linux `User-Agent` and fails with a Windows one. That is still one
+  hop on one machine: middleboxes, NAT and tunnel or proxy hops on the internet change TTL,
+  MSS and options, and the Ubuntu runner's kernel is the only one tested. The kernel keeps
+  only the SYNs that arrive after the option is set, so `keep_syn` runs right after the port
+  is bound. Until more reports from real clients have been looked at, treat `tcpip.tcp_syn`,
+  `p0f` and the `audit` checks `tcp_os` and `tcp_mss` as unproven on live traffic. What is
+  known to be missing or different from a packet capture:
   - Only the headers are kept, so `payload_len` is 0 and p0f's payload class is `0` also for a
     TCP Fast Open SYN. `tcpip.ip` and `tcpip.tcp`, which tls.peet.ws fills from the client's
     ACK, stay `{}`.
