@@ -166,7 +166,7 @@ how a connection is read, limits and known gaps. [Deploy](docs/deploy.md),
 
 ## Status
 
-Version 0.1.6, 391 tests, run on Ubuntu, macOS and Windows in CI. Release binaries are built in
+Version 0.1.7, 393 tests, run on Ubuntu, macOS and Windows in CI. Release binaries are built in
 CI for Linux (static, x86_64 and arm64), macOS and Windows, and the image for amd64 and arm64.
 
 Run on a server on the internet (Ubuntu 24.04, port 443, installed with `mirrust install`,

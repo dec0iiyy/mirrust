@@ -93,7 +93,7 @@ mirrust's output. See [Compatibility with tls.peet.ws](#compatibility-with-tlspe
 
 ## Status
 
-This is version 0.1.6.
+This is version 0.1.7.
 
 Measured today: the TLS ClientHello over TCP and QUIC, the HTTP/1 request headers, the HTTP/2
 frames and Akamai fingerprint, the first flight of a QUIC connection, the HTTP/3 SETTINGS
@@ -126,7 +126,7 @@ them as `a.b.c.d:port`, not `[::ffff:a.b.c.d]:port`. The network job above adds 
 over an interface, without HTTP/3 (the runner's curl has none). Not run: IPv6 over the
 internet, and HTTP/3 over IPv6 anywhere but loopback.
 
-Tested: `cargo test --workspace` (391 tests) in CI on Ubuntu, macOS and Windows; clippy and
+Tested: `cargo test --workspace` (393 tests) in CI on Ubuntu, macOS and Windows; clippy and
 `cargo fmt --all --check` in CI on Ubuntu; `cargo check` of all targets with Rust 1.88, the
 minimum supported version, in CI on Ubuntu; and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
@@ -715,7 +715,7 @@ curl-impersonate and 24 captured from clients through the server. Tests check th
 Other tests cover the JA4 worked example from the FoxIO specification, the RFC 9001 Appendix A
 QUIC Initial, a recorded Chrome QUIC Initial split over two datagrams, and the server end to end
 over HTTP/1.1, HTTP/2 and HTTP/3 with an in-process client, including the connection limit,
-the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 388 tests.
+the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 393 tests.
 
 The ClientHello, HTTP/2, QUIC Initial and SYN parsers also have cargo-fuzz targets in `fuzz/`,
 run weekly by `.github/workflows/fuzz.yml`; see "Fuzzing" in [CONTRIBUTING.md](../CONTRIBUTING.md).
