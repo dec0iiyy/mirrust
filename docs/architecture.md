@@ -382,9 +382,11 @@ function of the command's exit code, the scores and `--fail-under`.
   fields and the `tcp_os` check with a Linux `User-Agent`. The CI job `syn-network` runs
   `.github/scripts/syn-network-test.sh`: the release binary listens on 10.77.0.1 in one
   network namespace and curl calls it from 10.77.0.2 in another, over a veth pair, so the SYN
-  comes from another network stack over an interface. It checks the addresses and ports, TTL,
-  MSS, window and options in ranges, the p0f signature, that `tcp_mss` is measured, and that
-  `tcp_os` passes with a Linux `User-Agent` and fails with a Windows one. That is still one
+  comes from another network stack over an interface; then the same over IPv6 (fd77::1 and
+  fd77::2), and an IPv4 client of a `[::]` listener. It checks the addresses and ports, TTL
+  (IPv6: hop limit), MSS, window and options in ranges, the p0f signature (`4:` or `6:`), that
+  `tcp_mss` is measured, and that `tcp_os` passes with a Linux `User-Agent` and fails with a
+  Windows one. `crates/server/tests/ipv6.rs` reads an IPv6 loopback SYN. That is still one
   hop on one machine: middleboxes, NAT and tunnel or proxy hops on the internet change TTL,
   MSS and options, and the Ubuntu runner's kernel is the only one tested. The kernel keeps
   only the SYNs that arrive after the option is set, so `keep_syn` runs right after the port

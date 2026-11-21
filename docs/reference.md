@@ -113,13 +113,20 @@ packets. On Linux the server takes the SYN of each TCP connection from the kerne
 `tcpip.tcp_syn` and `tcpip.p0f`; that path was written on macOS, a CI test on Ubuntu reads a
 loopback SYN through it, and one report from a server on the internet showed the `tcp_mss`
 check passing. A second CI job (`.github/scripts/syn-network-test.sh`) runs the server in one
-network namespace and curl in another, joined by a veth pair (10.77.0.1 and 10.77.0.2): it
-checks the SYN's fields, that `tcp_mss` is measured, and that `tcp_os` passes with a Linux
-`User-Agent` and fails with a Windows one. That covers one hop on one Ubuntu runner kernel,
-not the internet: middleboxes, NAT and tunnel or proxy hops change TTL, MSS and options on
-the way, so treat the TCP checks as unproven on real traffic.
+network namespace and curl in another, joined by a veth pair (10.77.0.1 and 10.77.0.2, and
+fd77::1 and fd77::2 for IPv6): over IPv4, over IPv6, and from an IPv4 client to a `[::]`
+listener, it checks the SYN's fields, that `tcp_mss` is measured, and that `tcp_os` passes
+with a Linux `User-Agent` and fails with a Windows one. That covers one hop on one Ubuntu
+runner kernel, not the internet: middleboxes, NAT and tunnel or proxy hops change TTL, MSS
+and options on the way, so treat the TCP checks as unproven on real traffic.
 
-Tested: `cargo test --workspace` (388 tests) in CI on Ubuntu, macOS and Windows; clippy and
+IPv6: `crates/server/tests/ipv6.rs` serves HTTP/1.1, HTTP/2 and HTTP/3 on `[::1]` and checks
+the reports (on Linux also the IPv6 SYN), and serves IPv4 clients from `[::]`, which must show
+them as `a.b.c.d:port`, not `[::ffff:a.b.c.d]:port`. The network job above adds an IPv6 SYN
+over an interface, without HTTP/3 (the runner's curl has none). Not run: IPv6 over the
+internet, and HTTP/3 over IPv6 anywhere but loopback.
+
+Tested: `cargo test --workspace` (391 tests) in CI on Ubuntu, macOS and Windows; clippy and
 `cargo fmt --all --check` in CI on Ubuntu; `cargo check` of all targets with Rust 1.88, the
 minimum supported version, in CI on Ubuntu; and on macOS `cargo doc --workspace --no-deps` and
 release binaries queried with curl and Chrome.
@@ -132,7 +139,7 @@ memory, and stopped cleanly. See [deploy.md](deploy.md) for the details.
 
 The built-in ACME client (`--domain auto`, TLS-ALPN-01 on port 443) has obtained a certificate
 from Let's Encrypt, staging and then production, on an Ubuntu 24.04 server, installed with
-`mirrust install` and the current `deploy/mirrust.service`. Not run yet: IPv6, the logrotate
+`mirrust install` and the current `deploy/mirrust.service`. Not run yet: IPv6 on a server, the logrotate
 rules, the Docker image's HTTP/3, and renewal, which happens about 30 days before expiry.
 
 The dataset behind the `client` field has 52 entries, so a real client often gets `ciphers`

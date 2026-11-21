@@ -166,13 +166,14 @@ how a connection is read, limits and known gaps. [Deploy](docs/deploy.md),
 
 ## Status
 
-Version 0.1.6, 388 tests, run on Ubuntu, macOS and Windows in CI. Release binaries are built in
+Version 0.1.6, 391 tests, run on Ubuntu, macOS and Windows in CI. Release binaries are built in
 CI for Linux (static, x86_64 and arm64), macOS and Windows, and the image for amd64 and arm64.
 
 Run on a server on the internet (Ubuntu 24.04, port 443, installed with `mirrust install`,
 Let's Encrypt certificate it obtained itself): HTTP/1.1 and HTTP/2. Checked in CI: the TCP SYN on
-loopback and between two network namespaces with distinct addresses. **Not run yet:** IPv6, log
-rotation, HTTP/3 against a server on the internet and in the container. The TCP checks are one
+loopback and between two network namespaces with distinct addresses, over IPv4 and IPv6; all
+three protocols on IPv6 loopback. **Not run yet:** IPv6 over the internet, log rotation, HTTP/3
+against a server on the internet and in the container. The TCP checks are one
 kernel (the CI runner's) and one live report; middleboxes, NAT and tunnel or proxy hops change
 TTL, MSS and options. On macOS and Windows the TCP checks show as not measured. Details:
 [docs/reference.md](docs/reference.md#status).

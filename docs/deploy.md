@@ -22,9 +22,11 @@ production. The server answered over HTTP/1.1 and HTTP/2. See
 [Install with `mirrust install`](#install-with-mirrust-install) and
 [What the tests cover](#what-the-tests-cover-and-what-they-do-not).
 
-What has not been run: IPv6, the firewall steps, the logrotate rules, certificate renewal
-(about 30 days before expiry), and HTTP/3 against that server and in the Docker image. Check
-those before you rely on them.
+What has not been run: IPv6 on that server, the firewall steps, the logrotate rules,
+certificate renewal (about 30 days before expiry), and HTTP/3 against that server and in the
+Docker image. Check those before you rely on them. IPv6 is checked by tests only: HTTP/1.1,
+HTTP/2 and HTTP/3 on IPv6 loopback, IPv4 clients of a `[::]` listener, and in CI the TCP SYN
+of an IPv6 client over a link between two network namespaces.
 
 You need:
 
@@ -397,8 +399,9 @@ Review the sandbox with `systemd-analyze security mirrust.service`.
 
 `--listen` takes one socket address. `0.0.0.0:443` accepts IPv4 only. To accept IPv6 as well,
 change it to `[::]:443`: with the Linux default `net.ipv6.bindv6only=0`, that socket also
-accepts IPv4, and IPv4 clients then appear in reports and in the log as IPv4-mapped addresses
-such as `[::ffff:203.0.113.7]:51234`.
+accepts IPv4. The kernel hands IPv4 clients over as IPv4-mapped addresses
+(`::ffff:203.0.113.7`); reports and the log show them as plain IPv4, `203.0.113.7:51234`, as
+tls.peet.ws does, and their SYN is the IPv4 packet they sent (`ip_version` 4).
 
 Keep the port at 443 or change it in the unit, not with a port redirect: responses carry
 `Alt-Svc: h3=":PORT"` with the port mirrust itself listens on, and clients use that port for
