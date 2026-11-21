@@ -95,7 +95,7 @@ pub async fn serve_h3(
         let config = Arc::clone(&config);
         tokio::spawn(async move {
             let _slot = slot;
-            let peer = incoming.remote_address();
+            let peer = crate::client_address(incoming.remote_address());
             let handled =
                 tokio::time::timeout(CONNECTION_TIMEOUT, handle(incoming, &hellos, &config)).await;
             match handled {
@@ -146,7 +146,9 @@ async fn handle(incoming: Incoming, hellos: &ClientHellos, config: &Config) -> a
     let initial = hellos.take(peer, &dcid);
     let (connection, streams) = TapConnection::new(h3_quinn::Connection::new(connection));
     let client = Client {
-        peer,
+        // The sniffer's table is keyed by the address as the socket gave it; reports show it
+        // as the TCP listener does.
+        peer: crate::client_address(peer),
         streams,
         http3: OnceLock::new(),
         tls: initial

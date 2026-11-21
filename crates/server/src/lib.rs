@@ -208,6 +208,7 @@ pub async fn serve(
                 continue;
             }
         };
+        let peer = client_address(peer);
         let Some(slot) = config.connections.try_admit() else {
             // Dropping the stream closes it; the refusal is counted by the limit.
             continue;
@@ -222,6 +223,13 @@ pub async fn serve(
             }
         });
     }
+}
+
+/// The client's address as reports and logs show it: an IPv4 client of an IPv6 socket
+/// (`--listen [::]:443`) arrives as `::ffff:a.b.c.d` and is shown as `a.b.c.d`, as Go's
+/// `net.Addr.String` shows it on tls.peet.ws.
+fn client_address(peer: SocketAddr) -> SocketAddr {
+    SocketAddr::new(peer.ip().to_canonical(), peer.port())
 }
 
 /// Serves one TCP connection; every step must be done by `deadline`.
