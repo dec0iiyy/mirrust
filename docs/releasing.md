@@ -73,7 +73,9 @@ Notes:
 
 1. **Bump the version.** Set `version` in `crates/server/Cargo.toml`, the `server` package
    that holds the `mirrust` binary. The workflow compares the tag with this value and only
-   this one: the other crates have their own versions and are not published. Update the
+   this one: the other crates have their own versions and are not part of the release (for
+   the `fingerprint` library on crates.io, see
+   [Publishing the fingerprint crate](#publishing-the-fingerprint-crate)). Update the
    version that the README states (the "Status" section) if it names one.
 2. **Update the lock file and check the build:**
 
@@ -191,6 +193,49 @@ below work for a repository admin, who bypasses the ruleset, and fail for anyone
   same command. If it failed before that, "Re-run failed jobs" works. If a release was
   created but is wrong, delete it with `gh release delete v0.2.0 --cleanup-tag` and start
   again with a new tag; do not move a tag that users may have seen.
+
+## Publishing the fingerprint crate
+
+The `crates/fingerprint` library is the one crate prepared for crates.io, as the package
+`mirrust-fingerprint` (the name `fingerprint` is taken there; code still says
+`use fingerprint::...` through `[lib] name`). It depends on no other workspace crate, and
+the known-client dataset it compiles in lives inside it (`data/clients.jsonl`). Nothing
+publishes it automatically: the binary release above does not touch crates.io.
+
+1. **Bump `version`** in `crates/fingerprint/Cargo.toml`. crates.io keeps every version
+   forever and never accepts the same version twice, so each publish needs a new one. Commit
+   it (with the `Cargo.lock` change) and let CI pass.
+2. **Dry run.** It builds the crate from the packaged files alone, in a clean directory:
+
+   ```console
+   $ cargo package -p mirrust-fingerprint --list
+   $ cargo publish -p mirrust-fingerprint --dry-run
+   ```
+
+   The warnings that the tests are ignored are expected: `tests/` reads the workspace's
+   `corpus/` and is excluded from the package.
+3. **Log in** once per machine, with an API token from <https://crates.io/settings/tokens>
+   (scope `publish-new` for the first upload, `publish-update` afterwards). The crates.io
+   account needs a verified email address before it can publish.
+
+   ```console
+   $ cargo login
+   ```
+
+4. **Publish:**
+
+   ```console
+   $ cargo publish -p mirrust-fingerprint
+   ```
+
+A published version cannot be deleted or overwritten. If one is broken, yank it, which
+stops new projects from resolving to it but keeps existing lock files working, and publish
+a fixed version:
+
+```console
+$ cargo yank --version 0.1.0 mirrust-fingerprint
+$ cargo yank --version 0.1.0 --undo mirrust-fingerprint
+```
 
 ## Verify a download
 

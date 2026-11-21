@@ -1,11 +1,22 @@
 [package]
-name = "fingerprint"
-description = "TLS client fingerprints (JA3, JA4, PeetPrint) as tls.peet.ws reports them"
+name = "mirrust-fingerprint"
+description = "TLS ClientHello parser with JA3, JA4 (FoxIO and tls.peet.ws) and PeetPrint fingerprints"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+repository = "https://github.com/dec0iiyy/mirrust"
+homepage = "https://github.com/dec0iiyy/mirrust"
+documentation = "https://docs.rs/mirrust-fingerprint"
+readme = "README.md"
+keywords = ["ja4", "ja3", "tls", "fingerprint", "clienthello"]
+categories = ["network-programming", "parser-implementations"]
+# The tests read the workspace's corpus/ files, which are not part of the package.
+exclude = ["tests/"]
+
+[lib]
+# Code refers to the crate as `fingerprint`; the package name is taken on crates.io.
+name = "fingerprint"
 
 [dependencies]
 md-5.workspace = true

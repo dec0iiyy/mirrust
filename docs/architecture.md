@@ -4,7 +4,7 @@
 
 ```
 fingerprint   ClientHello parser, JA3, JA4, ja4_peet, PeetPrint, details,    (no I/O)
-              known-client lookup over corpus/clients.jsonl
+              known-client lookup over crates/fingerprint/data/clients.jsonl
 audit         consistency checks and score                                   (no I/O; uses fingerprint)
 http2         HTTP/2 frame parser, Akamai fingerprint, one-request responder (tokio I/O traits only)
 quic          QUIC Initial decryption and CRYPTO reassembly                  (rustls::quic for crypto)

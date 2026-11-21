@@ -1,6 +1,6 @@
 //! Prints the spec JA4 of every ClientHello in a corpus file: `name<TAB>ja4`.
 //!
-//! `cargo run -p fingerprint --example corpus -- corpus/hellos.jsonl`
+//! `cargo run -p mirrust-fingerprint --example corpus -- corpus/hellos.jsonl`
 
 use std::{env, fs};
 

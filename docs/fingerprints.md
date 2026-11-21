@@ -652,7 +652,7 @@ report does not use the version.
 
 ### 12.3 The dataset
 
-`corpus/clients.jsonl` is built into the `fingerprint` crate (`fingerprint::known`). One JSON
+`crates/fingerprint/data/clients.jsonl` is built into the `fingerprint` crate (`fingerprint::known`). One JSON
 object per line, one line per JA4:
 
 | Key | Content |
@@ -687,7 +687,7 @@ Sources:
   already in the file (aiohttp, axios, got) have no line of their own.
 
 To add a client, request `/api/all` with it, copy `tls.ja4`, `tls.ja4_r` and
-`http2.akamai_fingerprint` into a new line, and run `cargo test -p fingerprint`: the tests check
+`http2.akamai_fingerprint` into a new line, and run `cargo test -p mirrust-fingerprint`: the tests check
 that every line parses, that `ja4` is unique and is the hash of `ja4_r`, and that every
 SNI-carrying browser profile of `corpus/hellos.jsonl` has its line. A new `family` also needs a
 row in `Client::agrees_with`.

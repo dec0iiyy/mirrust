@@ -14,7 +14,7 @@ anyhow = "1.0.104"
 base64 = "0.23"
 bytes = "1"
 clap = { version = "4.6", features = ["derive"] }
-fingerprint = { path = "crates/fingerprint" }
+fingerprint = { path = "crates/fingerprint", package = "mirrust-fingerprint" }
 golden = { path = "crates/golden" }
 h2 = "0.4"
 h3 = "0.0.8"

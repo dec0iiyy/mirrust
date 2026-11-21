@@ -1,4 +1,5 @@
-//! Proposes new `corpus/clients.jsonl` lines from curl-impersonate's test signatures.
+//! Proposes new `crates/fingerprint/data/clients.jsonl` lines from curl-impersonate's test
+//! signatures.
 //!
 //! Each captured signature (`tests/signatures/*.yaml` without `partial: true`) is turned into
 //! a ClientHello and a list of HTTP/2 frames, which this workspace's `fingerprint` and `http2`
@@ -38,8 +39,8 @@ struct Found {
 }
 
 /// Reads every signature in `signatures` (curl-impersonate's `tests/signatures`) and compares
-/// it with `dataset`, the text of `corpus/clients.jsonl`. `commit` names the upstream commit in
-/// the `source` of new lines.
+/// it with `dataset`, the text of `crates/fingerprint/data/clients.jsonl`. `commit` names the
+/// upstream commit in the `source` of new lines.
 ///
 /// # Errors
 ///

@@ -128,7 +128,7 @@ fn api_all_and_clean_report_the_client_for_each_user_agent() {
 fn the_test_client_is_recognized_as_rustls() {
     // The dataset holds this workspace's rustls with ALPN http/1.1, which is what `get` sends.
     // A rustls upgrade that changes the ClientHello turns this into a cipher match or none;
-    // then recapture the rustls entries of corpus/clients.jsonl.
+    // then recapture the rustls entries of crates/fingerprint/data/clients.jsonl.
     let (_runtime, addr, roots) = start();
     let (ja4, json) = get(addr, roots, "/api/all", CHROME);
     let client = &json["client"];
