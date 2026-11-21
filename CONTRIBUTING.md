@@ -99,7 +99,7 @@ lines.
 `crates/fingerprint/data/clients.jsonl` (docs/fingerprints.md section 12.3) ages with every browser release.
 The workflow `.github/workflows/corpus-sync.yml` runs on Mondays and on demand: it clones
 curl-impersonate (MIT) shallowly, runs `crates/corpus-sync`, appends the lines it prints,
-runs `cargo test -p fingerprint` and pushes the result to the branch `corpus-sync` with one
+runs `cargo test -p mirrust-fingerprint` and pushes the result to the branch `corpus-sync` with one
 pull request that lists the new entries and the reviewer checklist. With no new entries it
 changes nothing. `corpus-sync` is a dev-only crate: the release builds only `--bin mirrust`
 and it is not in `THIRD-PARTY-LICENSES.md`.
@@ -113,7 +113,7 @@ widening candidates. By hand:
 ```console
 $ git clone --depth 1 https://github.com/lexiforest/curl-impersonate.git /tmp/curl-impersonate
 $ cargo run -p corpus-sync -- /tmp/curl-impersonate crates/fingerprint/data/clients.jsonl >> crates/fingerprint/data/clients.jsonl
-$ cargo test -p fingerprint
+$ cargo test -p mirrust-fingerprint
 ```
 
 The reviewer checks that a new `family` has a row in `Client::agrees_with` and is in the

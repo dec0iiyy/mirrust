@@ -15,7 +15,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 audit = { path = "../audit" }
 bytes.workspace = true
-fingerprint = { path = "../fingerprint" }
+fingerprint.workspace = true
 h3.workspace = true
 h3-quinn.workspace = true
 http.workspace = true
