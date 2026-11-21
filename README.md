@@ -4,57 +4,55 @@
 
 <p align="center">
   <a href="https://github.com/dec0iiyy/mirrust/actions/workflows/ci.yml"><img src="https://github.com/dec0iiyy/mirrust/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/dec0iiyy/mirrust/releases/latest"><img src="https://img.shields.io/github/v/release/dec0iiyy/mirrust" alt="Release"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/dec0iiyy/mirrust/releases/latest">Download</a> &middot;
-  <a href="docs/docker.md">Docker</a> &middot;
-  <a href="docs/deploy.md">Deploy</a> &middot;
+  <a href="#quick-start">Quick start</a> &middot;
+  <a href="#test-your-own-client">Test a client</a> &middot;
+  <a href="#deploy">Deploy</a> &middot;
+  <a href="#options">Options</a> &middot;
   <a href="docs/reference.md">Reference</a> &middot;
   <a href="https://github.com/dec0iiyy/mirrust/discussions">Discussions</a>
 </p>
 
-mirrust is an HTTPS server in one small binary. It reads the TLS ClientHello, the HTTP/2 frames
-and the HTTP/3 handshake of every connection, computes the fingerprints that anti-bot systems
-use, and scores whether those layers agree with each other and with the `User-Agent`.
+mirrust is an HTTPS server in one binary. It reads the TLS ClientHello, the HTTP/2 frames and the
+HTTP/3 handshake of every connection, computes the fingerprints anti-bot systems use (JA4, JA3,
+PeetPrint, Akamai), and scores whether the layers agree with each other and with the
+`User-Agent`. When they do not, it shows what to change.
 
 ```console
-$ curl -sk https://localhost:8443/api/clean | jq -c .audit
-{"score":100,"verdict":"consistent"}
+$ mirrust probe -- sh -c 'curl -s -o /dev/null -A "Mozilla/5.0 ... Chrome/160.0.0.0 Safari/537.36" \
+    --cacert "$MIRRUST_CACERT" "$MIRRUST_URL"'
+AUDIT  30/100  [######              ]  inconsistent
+  Looks like curl 8.7.1 (same cipher suites). The User-Agent claims Chrome.
+  [FAIL] User-Agent against the TLS stack
+         The User-Agent says Chrome, but the TLS stack is curl 8.7.1
+  [FAIL] Request headers of the claimed browser
+         Chrome sends these with every request; missing here: sec-ch-ua,
+         sec-fetch-*, accept-language, accept-encoding
 
-$ curl -sk -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/160.0.0.0 Safari/537.36" \
-    https://localhost:8443/api/clean | jq -c .audit
-{"score":30,"verdict":"inconsistent"}
+DIFF -------------------------------------------------------------------------
+  Reference           Chrome 155-160 (Canary 160.0.8171.0); captured from the
+                      browser
+  Extensions missing  status_request (5), signed_certificate_timestamp (18),
+                      extended_master_secret (23), compress_certificate (27),
+                      session_ticket (35), and 5 more
+  HTTP/2 yours        3:100;4:10485760;2:0|1048510465|0|m,s,a,p
+  HTTP/2 reference    1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p
+  Headers missing     sec-ch-ua, sec-fetch-*, accept-language, accept-encoding
 ```
 
-The second client is curl wearing a Chrome `User-Agent`. mirrust sees the curl TLS stack and the
-missing browser headers behind it.
+curl wearing a Chrome `User-Agent`: the `User-Agent` is one layer of four, and the other three
+still say curl. The diff is against a named, recorded sample of the browser, not a spec.
 
-## Why mirrust
+## Quick start
 
-| | |
-| --- | --- |
-| **A verdict, not just hashes** | An `audit` score from 0 to 100 compares the `User-Agent`, the TLS stack, the HTTP/2 settings and the request headers, and says which layer gives the client away. A client that claims a browser also gets a diff against a named recorded sample of that browser: the extensions, cipher suites, HTTP/2 settings and headers that differ. |
-| **Every layer on one port** | TLS over TCP and QUIC, HTTP/1.1, HTTP/2 and HTTP/3, all served from one address. |
-| **The fingerprints people use** | JA4 per the FoxIO specification (with `_o`, `_r` and `_ro`), JA3, PeetPrint and the Akamai HTTP/2 string, in the JSON layout of tls.peet.ws, plus an HTTP/3 fingerprint of its own. |
-| **Knows real clients** | A dataset of 52 clients: Chrome, Firefox, Safari, curl, Go, Python, Node.js, Java, Ruby, rustls and okhttp. |
-| **Small and self-contained** | One binary of about 5 MB that idles at about 6 MB of memory. No database, no runtime to install. |
-| **Made for the open internet** | A connection limit, bounded memory per client, property-tested parsers, no `unsafe` code, and an optional JSON Lines request log. |
-| **Keeps nothing about you** | The installed service writes no request log and nothing per request to the journal. A visitor's IP address lives in memory while the page is built. |
-
-It is for people who build or test HTTP clients and browser-impersonation libraries, run
-anti-bot or anti-fraud defences, or need to see exactly what a client sends.
-
-## Try it
-
-**macOS and Linux** (Intel and ARM). One command downloads the right binary into the current
-folder, checks its checksum, and needs no `sudo`:
+**macOS and Linux** (Intel and ARM): one command, the right binary, checksum verified, no `sudo`.
 
 ```console
 $ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh -s -- --prefix .
 $ ./mirrust
-listening on https://127.0.0.1:8443 (TCP and HTTP/3 over UDP)
-self-signed certificate: open https://localhost:8443 in a browser and accept the warning, or run: curl -k https://localhost:8443
 ```
 
 **Windows** (PowerShell):
@@ -64,137 +62,120 @@ self-signed certificate: open https://localhost:8443 in a browser and accept the
 > .\mirrust.exe
 ```
 
-Then, in another terminal, look at it: `open https://localhost:8443` on macOS, `xdg-open
-https://localhost:8443` on Linux, `start https://localhost:8443` on Windows. Or stay in the
-terminal with `curl -k https://localhost:8443`. Stop the server with Ctrl-C. To install it for
-good, run `curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh`,
-which puts `mirrust` in `/usr/local/bin`. To build it yourself you need Rust 1.88 or later:
-`cargo build --release`, then `./target/release/mirrust`.
+**Docker:** [docs/docker.md](docs/docker.md). **From source:** Rust 1.88 or later,
+`cargo build --release`.
 
-Open <https://localhost:8443> in a browser for the page: the score, every check behind it, what
-differs from the browser the `User-Agent` claims, the fingerprints, the cipher suites and extensions in the order sent, and the full JSON. The
-certificate is self-signed, so use `curl -k` on the command line, where `/` prints a plain-text
-report:
+It listens on `https://localhost:8443` with a self-signed certificate. Open it in a browser and
+accept the warning for the page, or stay in the terminal:
 
 ```console
 $ curl -k https://localhost:8443
-mirrust  (h2, TLS 1.3, 127.0.0.1:54902)
-
-AUDIT  100/100  [####################]  consistent
-  Looks like curl 8.7.1 (exact match). The User-Agent claims curl.
-
-  3 checks passed, 1 not measured
-  [ ok ] TLS fingerprint against known clients
-         Identical to curl 8.7.1
-  [ ok ] User-Agent against the TLS stack
-         The User-Agent says curl, the TLS stack is curl
-  [ ok ] HTTP/2 fingerprint against the client
-         Settings, window and header order are those of curl
-  [skip] TCP stack against the User-Agent
-         Not measured: this server did not capture the TCP SYN. Behind a proxy
-         or tunnel the TCP stack is the exit's, the User-Agent the device's,
-         and the two disagree here
-
-FINGERPRINTS -----------------------------------------------------------------
-  ja4        t13d4907h2_0d8feac7bc37_7395dae3b2f3
-  ja4_o      t13d4907h2_2677ac475d6b_c6f9150fbe3b
-  ja3        375c6162a492dfbf2795909110ce8424
-  peetprint  0d6ceceb9e71ec096d2022ad0651e2f2
-  akamai     64a832f547be33249bf4d33e8a46c5dc
-             3:100;4:10485760;2:0|1048510465|0|m,s,a,p
-
-TLS --------------------------------------------------------------------------
-  Highest TLS version offered  TLS 1.3 (also 1.2, 1.1, 1.0)
-  Cipher suites                49
-  Extensions                   7
-  ALPN                         h2, http/1.1
-  Server name (SNI)            localhost
-  Post-quantum key exchange    No (groups: X25519, P-256, P-384, P-521)
-  Encrypted ClientHello        Not sent
-  Legacy cipher suites         32 of 49 (8 broken)
-  GREASE                       No
-
-colour: ?color=1  JSON: /api/all  short JSON: /api/clean  page: /?format=html
 ```
 
-`/` answers with this text unless the request's `Accept` header contains `text/html` (browsers),
-so curl, wget and scripts get text and browsers get the page; `?format=html` and `?format=text`
-force either, `/text` is always text, and `?color=1` adds ANSI colour for a terminal (off by
-default, so a pipe or a file stays clean).
+`/` answers with plain text unless the `Accept` header contains `text/html`, so curl and scripts
+get text and browsers get the page.
+
+| URL | Gives |
+| --- | --- |
+| `/` | text report or page, by `Accept`; `?format=html`, `?format=text`, `?color=1` for ANSI colour |
+| `/api/all` | everything as JSON: fingerprints, extensions, HTTP/2 frames, `audit` |
+| `/api/clean` | the short JSON |
+
+To keep it: `curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh`
+puts `mirrust` in `/usr/local/bin`.
 
 ## Test your own client
 
 `mirrust probe` starts a throwaway server on 127.0.0.1, runs your command with `MIRRUST_URL` and
-`MIRRUST_CACERT` set, and prints the report of each connection it made on stderr:
+`MIRRUST_CACERT` set, and prints each connection it saw on stderr. Your command's stdout stays
+clean.
 
 ```console
-$ mirrust probe -- sh -c 'curl -s --cacert "$MIRRUST_CACERT" "$MIRRUST_URL" >/dev/null'
-$ mirrust probe --fail-under 80 -- ./run-my-client   # exit 3 if the lowest audit score is below 80
+$ mirrust probe -- python3 my_scraper_check.py
+$ mirrust probe --fail-under 90 -- ./run-my-client     # exit 3 if the lowest score is below 90
+$ mirrust probe --json -- ./run-my-client              # one JSON object per connection
 ```
 
-It runs on loopback: TCP checks come from the loopback SYN on Linux (not measured on macOS and
-Windows), and a proxy or middlebox on a real network is not part of the test. Flags and exit
-codes: [docs/reference.md](docs/reference.md#probe).
+Use it as a test in CI: a library update that changes your TLS fingerprint turns the build red.
+It runs on loopback, so a proxy or middlebox on a real network is not part of the test.
+Exit codes and flags: [docs/reference.md](docs/reference.md#probe).
 
 ## Deploy
 
-On a Linux server with systemd and a DNS `A` record for your host name pointing at it:
+On a Linux server with systemd:
 
 ```console
 $ curl -fsSL https://github.com/dec0iiyy/mirrust/releases/latest/download/install.sh | sh
-$ sudo /usr/local/bin/mirrust install --domain mirror.example.com
+$ sudo mirrust install --domain mirror.example.com
 ```
 
-The first command downloads the binary for the machine (Linux or macOS, x86_64 or arm64),
-checks it against the release's `SHA256SUMS` and installs it as `/usr/local/bin/mirrust`. The
-second copies the binary there if it is not already, writes the sandboxed systemd unit from
-[`deploy/mirrust.service`](deploy/mirrust.service) with your flags, and starts the service on
-TCP and UDP port 443. Run it again with other flags to change them, and `sudo mirrust
-uninstall` to remove it. Open TCP and UDP port 443 in the firewall and nothing else: UDP
-carries HTTP/3.
+The second command writes a sandboxed systemd unit, starts it on TCP and UDP port 443, and
+mirrust gets and renews a Let's Encrypt certificate by itself (TLS-ALPN-01 on 443, no port 80).
+Open TCP and UDP 443 in the firewall, nothing else. `--domain` accepts the Let's Encrypt
+Subscriber Agreement.
 
-mirrust gets a Let's Encrypt certificate for that name by itself (TLS-ALPN-01 on port 443, so
-no port 80) and renews it; `--domain` means you accept the Let's Encrypt Subscriber Agreement.
-Add `--acme-staging` to try it out first. Without systemd, run the binary yourself:
-`sudo mirrust --domain mirror.example.com`. Or in Docker:
+- **No domain yet:** `--domain auto` uses `A-B-C-D.sslip.io` for the machine's public IPv4
+  address (a free third-party DNS service).
+- **Try first:** add `--acme-staging`.
+- **Your own certificate:** `--cert PEM --key PEM` instead of `--domain`.
+- **Change or remove:** run `install` again with other flags; `sudo mirrust uninstall`.
+- **Privacy:** the installed service writes no request log and nothing per request to the
+  journal. A visitor's IP address lives in memory while the report is built. `--log PATH` turns a
+  JSON Lines log on.
+- **Docker:** `docker run -d --name mirrust --restart unless-stopped -p 443:443/tcp -p 443:443/udp
+  --sysctl net.ipv4.ip_unprivileged_port_start=0 -v mirrust-data:/data
+  ghcr.io/dec0iiyy/mirrust --domain mirror.example.com --acme-dir /data/acme`
 
-```console
-$ docker run -d --name mirrust --restart unless-stopped -p 443:443/tcp -p 443:443/udp \
-    --sysctl net.ipv4.ip_unprivileged_port_start=0 -v mirrust-data:/data \
-    ghcr.io/dec0iiyy/mirrust --domain mirror.example.com --acme-dir /data/acme
-```
+By hand, with certbot files or log rotation: [docs/deploy.md](docs/deploy.md).
 
-To do it by hand (download without the script, your own unit, certificate files from certbot,
-log rotation), follow [docs/deploy.md](docs/deploy.md); for Docker Compose and the image,
-[docs/docker.md](docs/docker.md). `deploy/cloud-init.yaml` is an untested cloud-config for a
-fresh VPS. `mirrust install` and the built-in ACME client have run on an Ubuntu 24.04 server on
-the internet, with the Let's Encrypt staging CA and then production (see
-[docs/deploy.md](docs/deploy.md#install-with-mirrust-install)).
+## Options
+
+| Flag | Default | Does |
+| --- | --- | --- |
+| `--listen ADDR` | `127.0.0.1:8443`, `0.0.0.0:443` with `--domain` | address, TCP and UDP (HTTP/3) |
+| `--domain NAME` | | Let's Encrypt certificate for up to 4 names, or `auto` |
+| `--cert PEM --key PEM` | self-signed for `localhost` | your own certificate |
+| `--acme-dir DIR` | `./mirrust-acme` | where the ACME account and certificates are kept |
+| `--acme-email`, `--acme-staging` | | contact address; test CA |
+| `--log PATH` | no log | one JSON line per request and per failed handshake |
+| `--max-connections N` | `1024` | open connections, TCP and QUIC together |
+| `--cors-key KEY` | `X-CORS` | header prefix that turns on CORS; empty turns it off |
+
+`mirrust --help`, `mirrust install --help` and `mirrust probe --help` list the rest.
+
+## What it knows
+
+- **Fingerprints:** JA4 per the FoxIO specification (`_o`, `_r`, `_ro` too), JA3, PeetPrint, the
+  Akamai HTTP/2 string in the JSON layout of tls.peet.ws, and an HTTP/3 fingerprint of its own.
+- **Layers:** TLS over TCP and QUIC, HTTP/1.1, HTTP/2 and HTTP/3 on one port; on Linux also the
+  TCP SYN, for the TCP checks.
+- **Known clients:** 52 recorded: Chrome, Firefox, Safari, curl, Go, Python, Node.js, Java, Ruby,
+  rustls and okhttp. A weekly job proposes new ones as a pull request.
+- **Small:** one 6 to 8 MB binary, no database, no runtime to install; about 10 MB resident when
+  idle (measured on macOS).
+- **Careful on the open internet:** connection limit, bounded memory per client,
+  property-tested parsers, no `unsafe` code.
 
 ## Documentation
 
-- [Reference](docs/reference.md): flags, API, JSON fields, the request log.
-- [Fingerprints](docs/fingerprints.md): how every value is computed, and the `audit` checks.
-- [Common clients](docs/clients.md): how curl, Python, Node, Go, `reqwest` and Chrome score, and what a faked `User-Agent` costs.
-- [Architecture](docs/architecture.md): how a connection is read, limits and known gaps.
-- [Contributing](CONTRIBUTING.md) and [Security](SECURITY.md).
+[Reference](docs/reference.md): flags, API, JSON fields. [Fingerprints](docs/fingerprints.md):
+how each value is computed, the `audit` checks and the diff. [Common clients](docs/clients.md):
+how curl, Python, Node, Go, `reqwest` and Chrome score. [Architecture](docs/architecture.md):
+how a connection is read, limits and known gaps. [Deploy](docs/deploy.md),
+[Docker](docs/docker.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md).
 
 ## Status
 
-Version 0.1.6. 388 tests, run on Ubuntu, macOS and Windows in CI. The release binaries are built
-in CI for Linux (static, x86_64 and arm64), macOS and Windows, and the container image is built
-and smoke-tested there on amd64 and arm64. A Linux binary has run under the sandboxed systemd
-unit on an Ubuntu 24.04 server, on port 8443, and answered over HTTP/1.1, HTTP/2 and, with
-Chrome, HTTP/3. Since then it has also run on port 443 of an Ubuntu 24.04 server on the
-internet, installed with `mirrust install`, with a Let's Encrypt certificate it obtained itself,
-and answered over HTTP/1.1 and HTTP/2. Not run yet: IPv6, log rotation, HTTP/3 against that
-server and HTTP/3 in the container. On Linux the server takes each connection's TCP SYN from
-the kernel for the TCP checks of the `audit`; CI on Ubuntu reads a loopback SYN and a SYN sent
-between two network namespaces with distinct addresses, and one report from the internet
-showed the MSS check passing, but that is a single look: middleboxes, NAT and tunnel or proxy
-hops change TTL, MSS and options, and the runner's is the only kernel tested. On macOS
-and Windows the TCP checks show as not measured. Details are in
-[Reference](docs/reference.md#status).
+Version 0.1.6, 388 tests, run on Ubuntu, macOS and Windows in CI. Release binaries are built in
+CI for Linux (static, x86_64 and arm64), macOS and Windows, and the image for amd64 and arm64.
+
+Run on a server on the internet (Ubuntu 24.04, port 443, installed with `mirrust install`,
+Let's Encrypt certificate it obtained itself): HTTP/1.1 and HTTP/2. Checked in CI: the TCP SYN on
+loopback and between two network namespaces with distinct addresses. **Not run yet:** IPv6, log
+rotation, HTTP/3 against a server on the internet and in the container. The TCP checks are one
+kernel (the CI runner's) and one live report; middleboxes, NAT and tunnel or proxy hops change
+TTL, MSS and options. On macOS and Windows the TCP checks show as not measured. Details:
+[docs/reference.md](docs/reference.md#status).
 
 ## License
 
