@@ -1,0 +1,65 @@
+[package]
+name = "mirrust-fuzz"
+description = "cargo-fuzz targets for the parsers that read raw network input"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Not a member of the main workspace: it needs nightly and libFuzzer, and stays out of the
+# release build and of `cargo deny`.
+[workspace]
+
+[dependencies]
+fingerprint = { path = "../crates/fingerprint" }
+http2 = { path = "../crates/http2" }
+libfuzzer-sys = "0.4"
+quic = { path = "../crates/quic" }
+rustls = "0.23.46"
+serde_json = "1.0.154"
+tcpip = { path = "../crates/tcpip" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+
+[[bin]]
+name = "client_hello"
+path = "fuzz_targets/client_hello.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http2_frames"
+path = "fuzz_targets/http2_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "quic_datagrams"
+path = "fuzz_targets/quic_datagrams.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "quic_crypto"
+path = "fuzz_targets/quic_crypto.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tcp_syn"
+path = "fuzz_targets/tcp_syn.rs"
+test = false
+doc = false
+bench = false
