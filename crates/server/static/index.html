@@ -92,11 +92,21 @@
   .chk .d { grid-column: 2; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .chk.fail .d, .chk.warn .d { color: var(--ink); }
   .chk .tag { justify-self: start; }
+  .dif { margin-top: 4px; }
+  .dif-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 2px 14px; padding: 10px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+  .dif-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .dif-row .t { font-weight: 600; font-size: 14px; }
+  .dif-row .d { font-size: 13px; overflow-wrap: anywhere; }
+  .dif-row .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dif-row .pair { font: 12px/1.6 var(--mono); color: var(--muted); }
+  .dif-row details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .dif-note { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
   @media (max-width: 640px) {
     .verdict { grid-template-columns: minmax(0, 1fr); }
     .score { font-size: 56px; }
     .chk { grid-template-columns: minmax(0, 1fr); }
     .chk .d { grid-column: 1; }
+    .dif-row { grid-template-columns: minmax(0, 1fr); }
   }
   .panel > .body { padding: 14px 20px 20px; }
   @media (max-width: 640px) {
@@ -422,6 +432,64 @@ function verdict(report) {
     }))));
 }
 
+const REFERENCE_KINDS = {
+  utls_profile: "a uTLS profile, not a capture of the browser",
+  curl_impersonate: "a signature captured by curl-impersonate",
+  captured: "captured from the browser",
+};
+
+/** How many chips a diff row shows before the rest folds away. */
+const DIFF_CHIPS = 10;
+
+function diffChips(items, kind) {
+  const chip = (item) => tag(item.name ? `${item.name} (${item.id})` : item, kind, true);
+  const shown = items.slice(0, DIFF_CHIPS).map(chip);
+  const rest = items.slice(DIFF_CHIPS);
+  return el("div", {},
+    el("div", { class: "chips" }, shown),
+    rest.length ? el("details", {}, el("summary", {}, `and ${rest.length} more`), el("div", { class: "chips", style: "margin-top: 6px" }, rest.map(chip))) : null);
+}
+
+function diffRow(label, body) {
+  return el("div", { class: "dif-row" }, el("div", { class: "t" }, label), el("div", { class: "d" }, body));
+}
+
+/** What differs from the closest recorded sample of the browser the User-Agent claims; the server leaves it out when nothing does. */
+function diffPanel(report) {
+  const diff = report.audit && report.audit.diff;
+  if (!diff) return null;
+  const ref = diff.reference;
+  const rows = [];
+  const lists = [
+    ["Extensions missing", diff.tls.missing_extensions, "bad"],
+    ["Extensions extra", diff.tls.extra_extensions, "warn"],
+    ["Ciphers missing", diff.tls.missing_ciphers, "bad"],
+    ["Ciphers extra", diff.tls.extra_ciphers, "warn"],
+  ];
+  for (const [label, items, kind] of lists) {
+    if (items && items.length) rows.push(diffRow(label, diffChips(items, kind)));
+  }
+  const h2 = diff.http2;
+  if (h2) {
+    if (h2.reference == null) {
+      rows.push(diffRow("HTTP/2", "This reference has no HTTP/2 capture, so nothing to compare with."));
+    } else if (h2.differences && h2.differences.length) {
+      rows.push(diffRow("HTTP/2 differs", el("div", {},
+        h2.differences.map((d) => el("div", {}, el("b", {}, d.field), ": ",
+          el("span", { class: "pair" }, `${d.yours == null ? "not sent" : d.yours} (yours) vs ${d.reference == null ? "not sent" : d.reference} (reference)`))))));
+      rows.push(diffRow("HTTP/2 strings", el("div", { class: "pair" }, `yours ${h2.yours}`, el("br"), `reference ${h2.reference}`)));
+    }
+  }
+  if (diff.headers && diff.headers.missing && diff.headers.missing.length) {
+    rows.push(diffRow("Headers missing", diffChips(diff.headers.missing, "bad")));
+  }
+  if (!rows.length) return null;
+  const kind = REFERENCE_KINDS[ref.kind] || ref.kind;
+  return panel("Difference from the claimed browser", `compared with ${ref.family} ${ref.version}, ${kind}`,
+    el("div", { class: "dif" }, rows),
+    el("p", { class: "dif-note" }, "The reference is a recorded sample, not a specification, and versions between recorded ones were not looked at. A clean diff does not mean a site will accept the client."));
+}
+
 function fingerprint(name, caption, value, raw, note, flagged) {
   return el("div", { class: "fp" },
     el("div", { class: "name" }, name, caption ? el("small", {}, caption) : null),
@@ -522,7 +590,7 @@ function render(report) {
     tag(negotiated || "?", "", true),
     tag(report.ip || "", "", true));
 
-  const content = [verdict(report), hero(tls)];
+  const content = [verdict(report), diffPanel(report), hero(tls)].filter(Boolean);
 
   content.push(panel("At a glance", "what stands out in the ClientHello", el("div", { class: "signals" }, signals(report))));
 
