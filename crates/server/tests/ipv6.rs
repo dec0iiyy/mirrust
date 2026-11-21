@@ -171,14 +171,18 @@ async fn fetch_http3(
         .with_no_client_auth();
     tls.alpn_protocols = vec![b"h3".to_vec()];
     let crypto = QuicClientConfig::try_from(tls).expect("QUIC-capable client config");
-    let local: IpAddr = if target.is_ipv6() {
-        Ipv6Addr::LOCALHOST.into()
+    // The address the server will see, and the one the socket binds to. An IPv6 client binds to
+    // the unspecified address: quinn makes that socket dual-stack, and Windows refuses that
+    // option on a socket bound to `::1` (error 10022). The kernel then picks `::1` as the
+    // source for a target on the loopback.
+    let (seen, bind): (IpAddr, IpAddr) = if target.is_ipv6() {
+        (Ipv6Addr::LOCALHOST.into(), Ipv6Addr::UNSPECIFIED.into())
     } else {
-        Ipv4Addr::LOCALHOST.into()
+        (Ipv4Addr::LOCALHOST.into(), Ipv4Addr::LOCALHOST.into())
     };
-    let mut endpoint = quinn::Endpoint::client((local, 0).into()).expect("client endpoint");
+    let mut endpoint = quinn::Endpoint::client((bind, 0).into()).expect("client endpoint");
     endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(crypto)));
-    let client = endpoint.local_addr().expect("client address");
+    let client = SocketAddr::new(seen, endpoint.local_addr().expect("client address").port());
     let connection = endpoint
         .connect(target, "localhost")
         .expect("connect")
