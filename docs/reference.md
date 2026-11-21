@@ -651,7 +651,7 @@ the server keeps serving, and the entries it can no longer queue are counted as 
 
 | Crate | Path | Contents |
 | --- | --- | --- |
-| `fingerprint` | `crates/fingerprint` | ClientHello parser, JA3, JA4 (FoxIO), the tls.peet.ws JA4 variant, PeetPrint, readable cipher and extension details, and the known-client lookup over `crates/fingerprint/data/clients.jsonl`. |
+| `fingerprint` | `crates/fingerprint` | Package `mirrust-fingerprint`, publishable to crates.io (see [releasing.md](releasing.md#publishing-the-fingerprint-crate)). ClientHello parser, JA3, JA4 (FoxIO), the tls.peet.ws JA4 variant, PeetPrint, readable cipher and extension details, and the known-client lookup over `crates/fingerprint/data/clients.jsonl`. |
 | `audit` | `crates/audit` | The consistency checks and the score: whether the layers of a connection agree with the client it claims to be; and the diff against the closest dataset entry of the claimed browser. Uses `fingerprint`; no I/O. |
 | `http2` | `crates/http2` | HTTP/2 frame capture, Akamai fingerprint, and the one-request HTTP/2 responder. |
 | `quic` | `crates/quic` | Extracts the ClientHello from a client's QUIC v1/v2 Initial packets, without a QUIC stack. |
