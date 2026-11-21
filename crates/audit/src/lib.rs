@@ -10,6 +10,9 @@
 //! check can only use the layers the server could observe and the clients it knows.
 
 mod checks;
+mod diff;
+
+pub use diff::{Code, Diff, Difference, HeadersDiff, Http2Diff, Reference, SourceKind, TlsDiff};
 
 use fingerprint::ClientHello;
 use fingerprint::known::{Match, UserAgent};
@@ -66,6 +69,11 @@ pub struct Audit {
     pub verdict: Verdict,
     /// Every check that applied, in a fixed order.
     pub checks: Vec<Check>,
+    /// What separates the connection from the recorded reference of the browser its
+    /// User-Agent claims; `None` when it claims none the dataset has, or nothing differs.
+    /// Information only: it takes nothing off the score.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<Diff>,
 }
 
 /// The TCP SYN of the connection.
@@ -155,5 +163,6 @@ pub fn audit(input: &Input<'_>) -> Audit {
         score,
         verdict,
         checks,
+        diff: diff::diff(input),
     }
 }

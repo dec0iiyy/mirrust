@@ -258,6 +258,46 @@ fn send_raw(addr: SocketAddr, roots: RootCertStore, request: &[u8]) -> (String, 
     (head.to_owned(), body.to_owned())
 }
 
+/// The `audit.diff` of `/api/all` for a request with `user_agent` from this rustls client.
+fn diff_for(user_agent: &str) -> Value {
+    let (_runtime, addr, roots) = start();
+    let request =
+        format!("GET /api/all HTTP/1.1\r\nHost: localhost\r\nUser-Agent: {user_agent}\r\n\r\n");
+    let (_, body) = send_raw(addr, roots, request.as_bytes());
+    let json: Value = serde_json::from_str(&body).expect("JSON body");
+    assert!(json["audit"]["score"].is_u64(), "{}", json["audit"]);
+    json["audit"]["diff"].clone()
+}
+
+#[test]
+fn a_chrome_user_agent_on_rustls_gets_a_diff_against_a_named_chrome_reference() {
+    let diff = diff_for(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) \
+         Chrome/150.0.0.0 Safari/537.36",
+    );
+    assert_eq!(diff["reference"]["family"], "Chrome", "{diff}");
+    let version = diff["reference"]["version"].as_str().expect("a version");
+    assert!(version.starts_with("150-158"), "{diff}");
+    assert_eq!(diff["reference"]["kind"], "curl_impersonate", "{diff}");
+    let missing = diff["tls"]["missing_extensions"]
+        .as_array()
+        .expect("a list");
+    assert!(
+        missing
+            .iter()
+            .any(|code| code["name"] == "application_settings"),
+        "{diff}"
+    );
+    // Headers rustls does not send but Chrome does.
+    let headers = diff["headers"]["missing"].as_array().expect("a list");
+    assert!(headers.iter().any(|name| name == "sec-ch-ua"), "{diff}");
+}
+
+#[test]
+fn the_same_client_under_its_own_user_agent_gets_no_diff() {
+    assert_eq!(diff_for("it/1"), Value::Null);
+}
+
 #[test]
 fn a_request_with_bare_lf_line_ends_is_answered_at_once() {
     let (_runtime, addr, roots) = start();

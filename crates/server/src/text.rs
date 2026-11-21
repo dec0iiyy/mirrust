@@ -6,7 +6,7 @@
 
 use std::mem;
 
-use audit::{Audit, Check, Status, Verdict};
+use audit::{Audit, Check, Diff, Status, Verdict};
 use serde_json::Value;
 
 use crate::printable::MAX_PRINTED;
@@ -20,6 +20,11 @@ const BAR_CELLS: usize = 20;
 const FINGERPRINT_LABEL: usize = 9;
 /// Width of the label column of the TLS block: the longest label, "Highest TLS version offered".
 const TLS_LABEL: usize = 27;
+/// Width of the label column of the DIFF block: the longest label, "Extensions missing".
+const DIFF_LABEL: usize = 18;
+/// Characters a list in the DIFF block may take before it ends in `and N more`: about two
+/// lines of its column.
+const DIFF_ROW_CHARS: usize = 100;
 /// Indent of every entry under a section title.
 const INDENT: &str = "  ";
 /// Columns between a label and its value.
@@ -97,6 +102,9 @@ fn render_with(report: &Report, audit: Option<&Audit>, client: &Value, colour: C
     if let (Some(tls), Some(audit)) = (&report.tls, audit) {
         page.verdict(audit, client);
         page.checks(audit);
+        if let Some(diff) = &audit.diff {
+            page.diff(diff);
+        }
         page.fingerprints(report, tls);
         page.tls(tls);
     } else {
@@ -237,6 +245,75 @@ impl Page {
         }
     }
 
+    /// What separates the connection from the reference of the claimed browser, one row per
+    /// layer that differs; long lists end in `and N more`.
+    fn diff(&mut self, diff: &Diff) {
+        self.section("DIFF");
+        let reference = &diff.reference;
+        let mut origin = reference.kind.label().to_owned();
+        if reference.also_captured {
+            origin.push_str(", also captured from a browser");
+        }
+        let named = format!(
+            "{} {}; {origin}",
+            clean(&reference.family),
+            clean(&reference.version)
+        );
+        self.row("Reference", DIFF_LABEL, &named, &[]);
+        let tls = &diff.tls;
+        let rows = [
+            ("Extensions missing", &tls.missing_extensions, true),
+            ("Extensions extra", &tls.extra_extensions, true),
+            ("Ciphers missing", &tls.missing_ciphers, false),
+            ("Ciphers extra", &tls.extra_ciphers, false),
+        ];
+        for (label, list, extensions) in rows {
+            if list.is_empty() {
+                continue;
+            }
+            let items: Vec<String> = list
+                .iter()
+                .map(|code| code_text(code.id, code.name, extensions))
+                .collect();
+            // Extensions get a third line: they are what an imitation most often lacks.
+            let limit = if extensions {
+                DIFF_ROW_CHARS * 3 / 2
+            } else {
+                DIFF_ROW_CHARS
+            };
+            self.row(label, DIFF_LABEL, &shortened(&items, limit), &[]);
+        }
+        if let Some(h2) = &diff.http2 {
+            match (&h2.reference, h2.differences.is_empty()) {
+                (None, _) => self.row(
+                    "HTTP/2",
+                    DIFF_LABEL,
+                    "no HTTP/2 reference for this entry",
+                    &[],
+                ),
+                (Some(_), true) => self.row("HTTP/2", DIFF_LABEL, "equal to the reference", &[]),
+                (Some(reference), false) => {
+                    let fields: Vec<String> = h2
+                        .differences
+                        .iter()
+                        .map(|difference| {
+                            let field = &difference.field;
+                            clean(field.strip_prefix("SETTINGS ").unwrap_or(field))
+                        })
+                        .collect();
+                    let differs = shortened(&fields, DIFF_ROW_CHARS * 3 / 2);
+                    self.row("HTTP/2 yours", DIFF_LABEL, &client_text(&h2.yours), &[]);
+                    self.row("HTTP/2 reference", DIFF_LABEL, &clean(reference), &[]);
+                    self.row("HTTP/2 differs in", DIFF_LABEL, &differs, &[]);
+                }
+            }
+        }
+        if let Some(headers) = &diff.headers {
+            let missing = headers.missing.join(", ");
+            self.row("Headers missing", DIFF_LABEL, &missing, &[]);
+        }
+    }
+
     fn fingerprints(&mut self, report: &Report, tls: &TlsDetails) {
         self.section("FINGERPRINTS");
         let mut rows = vec![
@@ -333,6 +410,37 @@ fn client_text(text: &str) -> String {
     let mut out = clean(&kept);
     if text.chars().nth(MAX_PRINTED).is_some() {
         out.push_str("...");
+    }
+    out
+}
+
+/// `session_ticket (35)` for an extension, the bare name for a cipher suite, and the number
+/// in hex when the code point has no name.
+fn code_text(id: u16, name: Option<&str>, numbered: bool) -> String {
+    match name {
+        Some(name) if numbered => format!("{} ({id})", clean(name)),
+        Some(name) => clean(name),
+        None => format!("0x{id:04X}"),
+    }
+}
+
+/// `items` joined with commas, cut to about `limit` characters with `and N more`.
+fn shortened(items: &[String], limit: usize) -> String {
+    let mut out = String::new();
+    for (index, item) in items.iter().enumerate() {
+        let rest = items.len() - index;
+        let tail = if rest > 1 {
+            format!(", and {} more", rest - 1).len()
+        } else {
+            0
+        };
+        if index > 0 && out.len() + 2 + item.len() + tail > limit {
+            return format!("{out}, and {rest} more");
+        }
+        if index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(item);
     }
     out
 }
@@ -720,6 +828,7 @@ mod tests {
             score: 55,
             verdict: Verdict::Inconsistent,
             checks,
+            diff: None,
         }
     }
 
@@ -867,6 +976,7 @@ mod tests {
             score: 100,
             verdict: Verdict::Consistent,
             checks: vec![check("a", Status::Pass, "t", "d")],
+            diff: None,
         };
         let text = render_with(&report(), Some(&ok), &client(), Colour::Ansi);
         assert!(
@@ -878,6 +988,7 @@ mod tests {
             score: 70,
             verdict: Verdict::Suspicious,
             checks: vec![],
+            diff: None,
         };
         let text = render_with(&report(), Some(&odd), &client(), Colour::Plain);
         assert!(
@@ -908,6 +1019,54 @@ mod tests {
                 "User-Agent against the TLS stack"
             ]
         );
+    }
+
+    #[test]
+    fn the_diff_block_names_its_reference_and_cuts_long_lists() {
+        let code = |id| audit::Code { id, name: None };
+        let mut with_diff = mixed();
+        with_diff.diff = Some(Diff {
+            reference: audit::Reference {
+                family: "Chrome".to_owned(),
+                version: "150-158".to_owned(),
+                kind: audit::SourceKind::UtlsProfile,
+                also_captured: false,
+                source: "uTLS profile".to_owned(),
+            },
+            tls: audit::TlsDiff {
+                missing_extensions: (1..=40).map(code).collect(),
+                ..audit::TlsDiff::default()
+            },
+            http2: Some(audit::Http2Diff {
+                yours: "1:65536|0|0|m,a,s,p".to_owned(),
+                reference: None,
+                differences: Vec::new(),
+            }),
+            headers: Some(audit::HeadersDiff {
+                missing: vec!["sec-ch-ua", "accept-language"],
+            }),
+        });
+        let text = render_with(&report(), Some(&with_diff), &client(), Colour::Plain);
+        let block: Vec<&str> = text
+            .lines()
+            .skip_while(|line| !line.starts_with("DIFF "))
+            .take_while(|line| !line.is_empty())
+            .collect();
+        assert!(block.len() <= 12, "{block:#?}");
+        let block = block.join("\n");
+        assert!(block.contains("Chrome 150-158; uTLS profile"), "{block}");
+        assert!(block.contains("more"), "{block}");
+        assert!(
+            block.contains("no HTTP/2 reference for this entry"),
+            "{block}"
+        );
+        assert!(block.contains("sec-ch-ua, accept-language"), "{block}");
+        assert!(!block.contains("Ciphers"), "{block}");
+        for line in block.lines() {
+            assert!(line.len() <= WIDTH, "{} columns: {line}", line.len());
+        }
+        let without = render_with(&report(), Some(&mixed()), &client(), Colour::Plain);
+        assert!(!without.contains("DIFF "), "{without}");
     }
 
     #[test]

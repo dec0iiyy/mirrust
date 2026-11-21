@@ -26,3 +26,17 @@ pub use ja3::Ja3;
 pub use ja4::{Ja4, Transport};
 pub use ja4_peet::Ja4Peet;
 pub use peetprint::PeetPrint;
+
+/// The IANA name of a TLS cipher suite, as reports print it; `None` for a code point
+/// without one, GREASE included.
+#[must_use]
+pub fn cipher_suite_name(id: u16) -> Option<&'static str> {
+    names::cipher_suite(id)
+}
+
+/// The IANA name of a TLS extension type, as reports print it; `None` for a code point
+/// without one, GREASE included.
+#[must_use]
+pub fn extension_name(id: u16) -> Option<&'static str> {
+    names::extension(id)
+}

@@ -85,6 +85,12 @@ fn has_extension(hello: &ClientHello, kind: u16) -> bool {
     hello.extensions.iter().any(|e| e.kind == kind)
 }
 
+/// Whether the hello came over QUIC: it carries QUIC transport parameters.
+pub(crate) fn over_quic(hello: &ClientHello) -> bool {
+    has_extension(hello, QUIC_TRANSPORT_PARAMETERS)
+        || has_extension(hello, QUIC_TRANSPORT_PARAMETERS_DRAFT)
+}
+
 pub(crate) fn tls_known(input: &Input<'_>) -> Check {
     const ID: &str = "tls_known";
     const TITLE: &str = "TLS fingerprint against known clients";
@@ -184,8 +190,7 @@ pub(crate) fn tls_traits(input: &Input<'_>) -> Option<Check> {
     let hello = input.hello;
     let grease = hello.cipher_suites.iter().any(|&c| is_grease(c));
     // Chrome sends no GREASE in the cipher suites of a QUIC ClientHello, and offers h3 only.
-    let quic = has_extension(hello, QUIC_TRANSPORT_PARAMETERS)
-        || has_extension(hello, QUIC_TRANSPORT_PARAMETERS_DRAFT);
+    let quic = over_quic(hello);
     let alps = ALPS.iter().any(|&kind| has_extension(hello, kind));
     let offers_h2 = hello.alpn.iter().any(|name| name == b"h2");
 
@@ -438,9 +443,10 @@ pub(crate) fn http2(input: &Input<'_>) -> Option<Check> {
     })
 }
 
-pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
-    const ID: &str = "headers";
-    const TITLE: &str = "Request headers of the claimed browser";
+/// The headers the claimed browser sends with every request that this request lacks, each
+/// with the points its absence takes off. `None` when the server did not see the headers or
+/// the User-Agent claims no browser engine.
+pub(crate) fn missing_headers(input: &Input<'_>) -> Option<Vec<(&'static str, u8)>> {
     /// First versions (major, minor) that send a `Sec-Fetch-*` header: Chrome 76, Firefox 90
     /// and Safari 16.4, as MDN's browser-compat-data has them for `Sec-Fetch-Site` and
     /// `Sec-Fetch-Mode`. Older browsers are not penalised.
@@ -453,7 +459,6 @@ pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
     const SEC_CH_UA_FROM: (u32, u32) = (89, 0);
     let (lines, agent) = (input.headers?, input.agent?);
     let engine = engine(agent)?;
-    let family = agent.family.name();
     let has = |name: &str| {
         lines.iter().any(|line| {
             line.as_bytes()
@@ -476,26 +481,31 @@ pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
         .any(|&(kind, from)| kind == engine && since(from));
     let sends_sec_ch_ua = engine == Engine::Chromium && since(SEC_CH_UA_FROM);
 
-    let mut missing: Vec<&str> = Vec::new();
-    let mut penalty: u8 = 0;
+    let mut missing: Vec<(&'static str, u8)> = Vec::new();
     // Chromium leaves `Sec-CH-UA` out when JavaScript is blocked for the site or the
     // User-Agent was overridden without client hints, so a real browser can lack it: a warning.
     if sends_sec_ch_ua && !has("sec-ch-ua:") {
-        missing.push("sec-ch-ua");
-        penalty += 10;
+        missing.push(("sec-ch-ua", 10));
     }
     if sends_sec_fetch && !has("sec-fetch-") {
-        missing.push("sec-fetch-*");
-        penalty += 20;
+        missing.push(("sec-fetch-*", 20));
     }
     if !has("accept-language:") {
-        missing.push("accept-language");
-        penalty += 10;
+        missing.push(("accept-language", 10));
     }
     if !has("accept-encoding:") {
-        missing.push("accept-encoding");
-        penalty += 10;
+        missing.push(("accept-encoding", 10));
     }
+    Some(missing)
+}
+
+pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
+    const ID: &str = "headers";
+    const TITLE: &str = "Request headers of the claimed browser";
+    let missing = missing_headers(input)?;
+    let family = input.agent?.family.name();
+    let penalty: u8 = missing.iter().map(|&(_, points)| points).sum();
+    let names: Vec<&str> = missing.iter().map(|&(name, _)| name).collect();
     Some(if missing.is_empty() {
         check(
             ID,
@@ -516,7 +526,7 @@ pub(crate) fn headers(input: &Input<'_>) -> Option<Check> {
             penalty.min(HEADERS_MAX_PENALTY),
             format!(
                 "{family} sends these with every request; missing here: {}",
-                missing.join(", ")
+                names.join(", ")
             ),
         )
     })
