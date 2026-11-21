@@ -14,7 +14,6 @@ on:
       - deploy/Dockerfile
       - .dockerignore
       - crates/**
-      - corpus/clients.jsonl
       - deploy/mirrust.service
       - Cargo.toml
       - Cargo.lock
