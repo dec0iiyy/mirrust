@@ -45,18 +45,15 @@ fn empty_dataset_regenerates_the_entry() {
     // Every key in the dataset's order; the free-text `source` names the same file and commit.
     let keys = |v: &Value| v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>());
     assert_eq!(keys(&new), keys(&want));
-    for key in [
-        "family",
-        "version",
-        "version_min",
-        "version_max",
-        "library",
-        "ja4",
-        "ja4_r",
-        "akamai",
-    ] {
+    // The fingerprints and the family are what the tool derives. The version range of a dataset
+    // line is widened by hand when another browser sends the same hello, so it is checked
+    // against the fixture's own file name instead.
+    for key in ["family", "library", "ja4", "ja4_r", "akamai"] {
         assert_eq!(new[key], want[key], "key {key}");
     }
+    assert_eq!(new["version"], "150 (150.0.7871.127)");
+    assert_eq!(new["version_min"], 150);
+    assert_eq!(new["version_max"], 150);
     let source = new["source"].as_str().unwrap_or_default();
     assert!(
         source.starts_with(

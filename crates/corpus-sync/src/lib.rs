@@ -71,6 +71,14 @@ pub fn sync(signatures: &Path, commit: &str, dataset: &str) -> Result<Report> {
                     "{file}: {} {} already known (could widen the version range of {entry})",
                     signature.browser, signature.version
                 )),
+                None if is_resumed(&signature.ja4_r) => report.skipped.push(format!(
+                    "{file}: the hello resumes a session (pre_shared_key), not a first connection, skipped"
+                )),
+                None if !has_dataset_family(&signature.browser) => report.skipped.push(format!(
+                    "{file}: {} is not a family of the dataset (add it to Client::agrees_with and \
+                     the tests by hand), skipped",
+                    signature.browser
+                )),
                 None => found.push(Found { file, signature }),
             },
             Err(Skip::Partial) => report.skipped.push(format!("{file}: partial, skipped")),
@@ -124,6 +132,23 @@ fn known_ja4s(dataset: &str) -> Result<HashMap<String, String>> {
             ))
         })
         .collect()
+}
+
+/// Whether the `ja4_r` lists `pre_shared_key`: the hello resumes a session, which a first
+/// connection of the browser does not do.
+fn is_resumed(ja4_r: &str) -> bool {
+    ja4_r
+        .split('_')
+        .nth(2)
+        .unwrap_or_default()
+        .split(',')
+        .any(|kind| kind == PRE_SHARED_KEY)
+}
+
+/// The browsers whose `family` the dataset and `Client::agrees_with` already know. Edge is
+/// kept inside `Chrome`, as in the existing lines.
+fn has_dataset_family(browser: &str) -> bool {
+    matches!(browser, "chrome" | "firefox" | "safari")
 }
 
 /// The dataset's `family` and `library` for a curl-impersonate browser name.
@@ -214,10 +239,6 @@ fn entry(group: &[Found], commit: &str) -> Value {
         source.push_str(", HTTP/2");
     }
     source.push_str("; JA4 derived from a ClientHello rebuilt from the signature");
-    let extensions = first.ja4_r.split('_').nth(2).unwrap_or_default();
-    if extensions.split(',').any(|kind| kind == PRE_SHARED_KEY) {
-        source.push_str("; the hello resumes a session (pre_shared_key)");
-    }
     if group.iter().any(|f| f.signature.akamai != newest.akamai) {
         let _ = write!(
             source,
@@ -236,4 +257,28 @@ fn entry(group: &[Found], commit: &str) -> Value {
         "ja4_r": first.ja4_r,
         "akamai": newest.akamai,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_dataset_family, is_resumed};
+
+    #[test]
+    fn a_pre_shared_key_marks_a_resumed_hello() {
+        assert!(is_resumed("t13d1517h2_aaaa_0017,0029,002b"));
+        assert!(!is_resumed("t13d1516h2_aaaa_0017,002b,0033"));
+        // Only the extension part counts, not a cipher or a sort key that spells 0029.
+        assert!(!is_resumed("t13d1516h2_0029_0017,002b"));
+        assert!(!is_resumed("garbage"));
+    }
+
+    #[test]
+    fn only_the_families_of_the_dataset_are_proposed() {
+        for known in ["chrome", "firefox", "safari"] {
+            assert!(has_dataset_family(known));
+        }
+        for unknown in ["edge", "tor", "opera"] {
+            assert!(!has_dataset_family(unknown));
+        }
+    }
 }
