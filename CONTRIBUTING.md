@@ -94,6 +94,37 @@ so a snapshot diff you did not expect is usually a bug.
 New test inputs go into the input file as one more line; bless once to add their snapshot
 lines.
 
+## Fuzzing
+
+`fuzz/` holds cargo-fuzz (libFuzzer) targets for the code that reads raw client bytes. It is
+its own workspace with its own `Cargo.lock`, outside `crates/*`, so `cargo test`, `cargo deny`
+and the release build do not see it. Each target checks that nothing panics and that the
+output keeps its documented shape and limits:
+
+| Target | Input | Code |
+| --- | --- | --- |
+| `client_hello` | a handshake message | `ClientHello::parse` and `parse_peet`, JA4, JA3, PeetPrint, the details |
+| `http2_frames` | a chunk size byte, then a client stream | `http2::Parser` fed whole and in chunks, HPACK, `Http2Request` |
+| `quic_datagrams` | `u16`-length-prefixed datagrams | `quic::InitialAssembler`: packet headers, keys, decryption |
+| `quic_crypto` | a version byte, then `u16`-length-prefixed plaintext payloads | the same, with each payload sealed into an Initial packet: frames and CRYPTO reassembly |
+| `tcp_syn` | a packet from the IP header on | `tcpip::Syn::parse` |
+
+It needs a nightly toolchain and `cargo install --locked cargo-fuzz`. From the repository root:
+
+```console
+$ cargo +nightly fuzz run client_hello -- -max_total_time=60
+```
+
+The seeds in `fuzz/corpus/<target>/*.bin` come from `corpus/*.jsonl` and the QUIC test data;
+`python3 fuzz/seeds.py` writes them again. libFuzzer adds its own finds to the same directory;
+`fuzz/.gitignore` keeps them out of git. The workflow `.github/workflows/fuzz.yml` runs every
+target for 60 seconds weekly and on demand.
+
+A crash is written to `fuzz/artifacts/<target>/`. Reproduce it with
+`cargo +nightly fuzz run <target> <file>`, shrink it with `cargo +nightly fuzz tmin <target> <file>`,
+fix the library crate, and add the shrunk input as a unit test in that crate. Do not commit the
+artifact.
+
 ## Keeping the dataset fresh
 
 `corpus/clients.jsonl` (docs/fingerprints.md section 12.3) ages with every browser release.

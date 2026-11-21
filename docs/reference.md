@@ -710,6 +710,9 @@ QUIC Initial, a recorded Chrome QUIC Initial split over two datagrams, and the s
 over HTTP/1.1, HTTP/2 and HTTP/3 with an in-process client, including the connection limit,
 the request log and the shutdown on SIGTERM. In all, `cargo test --workspace` runs 388 tests.
 
+The ClientHello, HTTP/2, QUIC Initial and SYN parsers also have cargo-fuzz targets in `fuzz/`,
+run weekly by `.github/workflows/fuzz.yml`; see "Fuzzing" in [CONTRIBUTING.md](../CONTRIBUTING.md).
+
 ## Compatibility with tls.peet.ws
 
 The JSON field names, nesting, value formats and the tls.peet.ws-specific fingerprints
