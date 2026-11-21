@@ -12,7 +12,8 @@ $ cargo run --bin mirrust
 listening on https://127.0.0.1:8443 (TCP and HTTP/3 over UDP)
 ```
 
-`cargo build --release` produces `target/release/mirrust` and `target/release/fpdiff`.
+`cargo build --release` produces `target/release/mirrust` and `target/release/fpdiff` (and
+the dev tool `target/release/corpus-sync`, which no release ships).
 [docs/reference.md](docs/reference.md) describes the command line and the API; [docs/architecture.md](docs/architecture.md)
 describes the request flow and the design decisions, and
 [docs/fingerprints.md](docs/fingerprints.md) specifies every reported value.
@@ -92,6 +93,39 @@ so a snapshot diff you did not expect is usually a bug.
 
 New test inputs go into the input file as one more line; bless once to add their snapshot
 lines.
+
+## Keeping the dataset fresh
+
+`corpus/clients.jsonl` (docs/fingerprints.md section 12.3) ages with every browser release.
+The workflow `.github/workflows/corpus-sync.yml` runs on Mondays and on demand: it clones
+curl-impersonate (MIT) shallowly, runs `crates/corpus-sync`, appends the lines it prints,
+runs `cargo test -p fingerprint` and pushes the result to the branch `corpus-sync` with one
+pull request that lists the new entries and the reviewer checklist. With no new entries it
+changes nothing. `corpus-sync` is a dev-only crate: the release builds only `--bin mirrust`
+and it is not in `THIRD-PARTY-LICENSES.md`.
+
+The tool reads `tests/signatures/*.yaml`, skips `partial: true` and signatures it cannot read,
+rebuilds a ClientHello from each and hashes it with the `fingerprint` crate, and the HTTP/2
+frames with the `http2` crate. It prints only lines whose `ja4` the file lacks, one per JA4,
+and never changes existing lines; signatures whose JA4 is already there go to stderr as
+widening candidates. By hand:
+
+```console
+$ git clone --depth 1 https://github.com/lexiforest/curl-impersonate.git /tmp/curl-impersonate
+$ cargo run -p corpus-sync -- /tmp/curl-impersonate corpus/clients.jsonl >> corpus/clients.jsonl
+$ cargo test -p fingerprint
+```
+
+The reviewer checks that a new `family` has a row in `Client::agrees_with` and is in the
+test's `FAMILIES` list (the test fails until it is), updates the entry counts in README.md,
+docs/reference.md and docs/architecture.md, checks the version ranges (and widens existing
+ones from the candidates if wanted), and decides whether resumed hellos (`pre_shared_key`)
+belong in the file. The pull request needs the repository setting "Allow GitHub Actions to
+create and approve pull requests"; without it the job pushes the branch and fails, and the
+pull request can be opened by hand. A pull request opened with `GITHUB_TOKEN` does not start
+the CI workflow; push a commit to the branch or close and reopen it.
+
+uTLS profiles missing from `corpus/hellos.jsonl` are not synced yet; they are added by hand.
 
 ## Commits
 

@@ -630,6 +630,7 @@ the server keeps serving, and the entries it can no longer queue are counted as 
 | `server` | `crates/server` | The `mirrust` binary: TLS, HTTP/1.1, HTTP/2, HTTP/3, routes, request log. |
 | `fpdiff` | `crates/diff` | The `fpdiff` binary and library: semantic diff of two TLS (and HTTP/2) fingerprints. |
 | `golden` | `crates/golden` | Test support: the snapshot files under `corpus/` and the bless mode. Not used by the server. |
+| `corpus-sync` | `crates/corpus-sync` | Dev tool: prints the `corpus/clients.jsonl` lines that curl-impersonate's captured test signatures add (see CONTRIBUTING.md). Not part of a release. |
 
 `fpdiff REFERENCE CANDIDATE` reads tls.peet.ws-style JSON (`/api/all`, `/api/tls`, or a bare
 `tls` object) or a ClientHello in hex (handshake message or TLS record); `-` reads stdin. It

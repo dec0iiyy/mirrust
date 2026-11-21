@@ -13,6 +13,7 @@ tcpip         TCP SYN parser, tcp_syn details, p0f signature                 (no
 server        mirrust binary: listeners, TLS, HTTP/1, HTTP/2, HTTP/3, routes, request log, probe
 fpdiff        (crates/diff) fingerprint comparison, library and CLI; uses fingerprint
 golden        snapshot files under corpus/ for the tests; a dev-dependency only
+corpus-sync   dev tool: new clients.jsonl lines from curl-impersonate's signatures; not released
 ```
 
 `server` depends on `fingerprint`, `audit`, `http2`, `http3`, `quic` and `tcpip`. The parsing

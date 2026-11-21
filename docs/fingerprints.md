@@ -676,7 +676,9 @@ Sources:
   macOS and iOS. The ClientHello was rebuilt from the signature (ciphers, extension order and
   types, versions, ALPN, signature algorithms, groups) and fed to the code of this repository for
   the hashes. Only signatures that were captured are used, not the ones curl-impersonate derives
-  from profile options.
+  from profile options. `crates/corpus-sync` does this rebuild; the weekly workflow
+  `.github/workflows/corpus-sync.yml` proposes the lines it finds as a pull request (see
+  "Keeping the dataset fresh" in `CONTRIBUTING.md`).
 - Clients captured through mirrust itself with a server name, with their exact versions in
   `source`: curl, Python (`urllib`, httpx, requests), Go `net/http`, Node.js (`https`, `http2`,
   `fetch`), Ruby `Net::HTTP`, Java (`HttpClient`, `HttpsURLConnection`), `reqwest` and `ureq`
