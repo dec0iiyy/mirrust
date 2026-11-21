@@ -704,9 +704,10 @@ row in `Client::agrees_with`.
 - The version ranges are what was looked at, not when a fingerprint began or ended. For the
   browser entries they are the names of uTLS profiles or curl-impersonate signatures, and a
   range spans the ones that share a JA4; nobody captured the versions between them. Three consequences:
-  - **Chrome 134 to 149 and 151 to 154 are not in the dataset.** The entries around the gap
-    are the profile of 133, a signature of 150 and one entry for the profile of 155 and a
-    capture of Canary 160, which share a JA4. The profile of 133 and Canary 160 differ by one
+  - **Chrome 134 to 149 are not in the dataset.** The entries around the gap are the profile
+    of 133, one entry for a signature of 150 and a capture of Brave Beta 158 (the same hello;
+    151 to 157 were not looked at), and one entry for the profile of 155 and a capture of
+    Canary 160, which share a JA4. The profile of 133 and Canary 160 differ by one
     extension (51764, `trust_anchors`). A real Chrome of a version between is an `exact` match
     with whichever of the two it sends like, and the report then names that version, not the browser's. If it sends something
     else it is a `ciphers` match or `none`, which costs 5 or 10 points in the `audit`
